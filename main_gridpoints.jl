@@ -72,7 +72,7 @@ end
 
 function utility_function(c::Real, n::Real, q::Real, γ::Real, ψ::Real, κ::Real, q_bar::Real)
     """
-    utility function with child qquality
+    utility function with child quality
     """
     if c > 0.0
         if n == 0
