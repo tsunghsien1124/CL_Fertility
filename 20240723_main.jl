@@ -52,6 +52,9 @@ function binomial_matrix_function(n_max::Integer, p::Real)
 end
 
 function infertility_risk_function(data_age::Array{Int64,1}, data_inf::Array{Float64,1}, age_min::Integer, age_max::Integer, age_inf::Integer)
+    """
+    Exponential fit of infertility probability, intrapolated on ages up to age_inf
+    """
     model(t, ω) = ω[1] * exp.(ω[2] * t)
     ω_int = [0.5, 0.5]
     fit = curve_fit(model, data_age, data_inf, ω_int)
@@ -62,6 +65,9 @@ function infertility_risk_function(data_age::Array{Int64,1}, data_inf::Array{Flo
 end
 
 function h_function(data_h::Array{Float64,1}, age_min::Integer, age_ret::Integer)
+    """
+    Curve fit of life-cycle component, intrapolated on ages up to age_ret 
+    """
     model(t, ω) = ω[1] .+ ω[2] * t .+ ω[3] * t .^ 2 .+ ω[4] * t .^ 3
     ω_int = [0.5, 0.5, 0.5, 0.5]
     model_age = collect(age_min:age_ret)
@@ -73,6 +79,9 @@ end
 function utility_function(c::Real, n::Real, q::Real, γ::Real, ψ::Real, κ::Real, q_bar::Real)
     """
     utility function with child quality
+        c - consumption
+        n - number of kids
+        q - child quality
     """
     if c > 0.0
         if n == 0
@@ -92,6 +101,9 @@ end
 function quality_function(x::Real, l::Real, n::Integer, μ::Real, θ::Real, ψ_1::Real, ψ_2::Real)
     """
     child quality function
+        x - time input
+        l - monetary input
+        n - number of kids
     """
     if n > 0
         return (μ * (x / (n^ψ_1))^θ + (1.0 - μ) * (l / (n^ψ_2))^θ)^(1.0 / θ)
@@ -139,7 +151,7 @@ function parameters_function(;
     h_edu::Integer=0                # edu-dependent life-cycle income           
 )
     """
-    contruct an immutable object containg all paramters
+    Contruct an immutable object containg all paramters
     """
     # infertility parameters: taken from Trussell and Wilson (1985, Population Studies)
     data_inf = [0.07, 0.131, 0.231, 0.345, 0.576, 0.952]
@@ -318,7 +330,7 @@ end
 
 mutable struct Mutable_Variables
     """
-    construct a type for mutable variables
+    Construct a type for mutable variables
     """
     V::Array{Float64,7}
     policy_a_p::Array{Float64,7}
@@ -329,7 +341,7 @@ end
 
 function variables_function(parameters::NamedTuple)
     """
-    construct a mutable object containing endogenous variables
+    Construct a mutable object containing endogenous variables
     """
     # unpack parameters
     @unpack inf_size, d_size, a_size, n_size, ϵ_size, ν_size, age_size = parameters
@@ -348,7 +360,7 @@ end
 
 function solve_value_and_policy_function!(variables::Mutable_Variables, parameters::NamedTuple)
     """
-    compute value and policy functions
+    Compute value and policy functions
     """
 
     # unpack parameters
