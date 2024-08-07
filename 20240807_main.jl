@@ -335,9 +335,9 @@ mutable struct Mutable_Variables
     """
     V::Array{Float64,6}
     policy_a_p::Array{Float64,6}
-    policy_x::Array{Float64,6}
-    policy_l::Array{Float64,6}
-    policy_K::Array{Float64,6}
+    policy_x::Array{Int64,6}
+    policy_l::Array{Int64,6}
+    policy_K::Array{Int64,6}
 end
 
 function variables_function(parameters::NamedTuple)
