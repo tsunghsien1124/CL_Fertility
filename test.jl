@@ -669,33 +669,100 @@ function sol_6!(variables::Mutable_Variables, parameters::NamedTuple)
     nothing
 end
 
+function sol_7!(variables::Mutable_Variables, parameters::NamedTuple)
+
+    # unpack parameters
+    @unpack age_size, age_grid, age_max, age_ret, age_inf = parameters
+    @unpack ν_size, ν_grid, ν_Γ = parameters
+    @unpack ϵ_size, ϵ_grid, ϵ_Γ = parameters
+    @unpack n_size, n_grid, n_Γ, n_max = parameters
+    @unpack a_size, a_grid = parameters
+    @unpack l_size, l_grid, x_size, x_grid = parameters
+    @unpack inf_size, inf_grid = parameters
+    @unpack h_grid = parameters
+    @unpack b, r, γ, ψ, κ, β, μ, θ, ψ_1, ψ_2, q_bar, q_x = parameters
+
+    age_i = 48
+        age = age_grid[age_i]
+        age_ret_i = findall(parameters.age_grid .== parameters.age_ret)[]
+        age > age_ret ? h = h_grid[age_ret_i] : h = h_grid[age_i]
+        if age == age_ret # at retirement age
+            for ν_i = 1:ν_size, ϵ_i = 1:ϵ_size, n_i = 1:n_size, a_i = 1:a_size
+                @views ν = ν_grid[ν_i]
+                @views ϵ = ϵ_grid[ϵ_i]
+                @views n = n_grid[n_i]
+                @views a = a_grid[a_i]
+                w = exp(h + ϵ + ν)
+                if n == 0
+                    @views EV = variables.V[:, 1, ϵ_i, ν_i, 2, age_i+1]
+                    @views V_all = utility_function.((1.0 + r) * a + w .- a_grid, n, 0.0, γ, ψ, κ, q_bar) .+ β * EV
+                    @views V_max_i = argmax(V_all)
+                    @inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_all[V_max_i]
+                    @inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_max_i
+                else
+                    Sol_all_i = 0
+                    for a_p_i = 1:a_size, x_i = 1:x_size, l_i = 1:l_size
+                        @views a_p = a_grid[a_p_i]
+                        @views x = x_grid[x_i]
+                        @views l = l_grid[l_i]
+                        q = quality_function(x, l, n, μ, θ, ψ_1, ψ_2)
+                        @views temp = utility_function((1.0 + r) * a + (1.0 - l) * w - a_p - q_x * x, n, q, γ, ψ, κ, q_bar) + β * variables.V[a_p_i, 1, ϵ_i, ν_i, 2, age_i+1]
+                        if Sol_all_i == 0 
+                            @views @inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = temp
+                            @views @inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = a_p_i
+                            @views @inbounds variables.policy_x[a_i, n_i, ϵ_i, ν_i, 2, age_i] = x_i
+                            @views @inbounds variables.policy_l[a_i, n_i, ϵ_i, ν_i, 2, age_i] = l_i
+                        elseif temp > variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i]
+                            @views @inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = temp
+                            @views @inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = a_p_i
+                            @views @inbounds variables.policy_x[a_i, n_i, ϵ_i, ν_i, 2, age_i] = x_i
+                            @views @inbounds variables.policy_l[a_i, n_i, ϵ_i, ν_i, 2, age_i] = l_i
+                        end
+                        Sol_all_i += 1
+                    end
+                end
+            end
+        end
+    nothing
+end
+
+
 variables_1 = variables_function(parameters)
 # variables_2 = variables_function(parameters)
 # variables_3 = variables_function(parameters)
 # variables_4 = variables_function(parameters)
 variables_5 = variables_function(parameters)
-variables_6 = variables_function(parameters)
+# variables_6 = variables_function(parameters)
+variables_7 = variables_function(parameters)
 
 sol_1!(variables_1, parameters)
 # sol_2!(variables_2, parameters)
 # sol_3!(variables_3, parameters)
 # sol_4!(variables_4, parameters)
 sol_5!(variables_5, parameters)
-sol_6!(variables_6, parameters)
+# sol_6!(variables_6, parameters)
+sol_7!(variables_7, parameters)
 
 # @assert variables_1.V[:,:,:,:,2,48] == variables_2.V[:,:,:,:,2,48] == variables_3.V[:,:,:,:,2,48] == variables_4.V[:,:,:,:,2,48]
 # @assert variables_1.policy_a_p == variables_2.policy_a_p == variables_3.policy_a_p == variables_4.policy_a_p
 # @assert variables_1.policy_x == variables_2.policy_x == variables_3.policy_x == variables_4.policy_x
 # @assert variables_1.policy_l == variables_2.policy_l == variables_3.policy_l == variables_4.policy_l
 
-@assert variables_1.V[:,:,:,:,2,48] == variables_5.V[:,:,:,:,2,48] == variables_6.V[:,:,:,:,2,48]
-@assert variables_1.policy_a_p == variables_5.policy_a_p == variables_6.policy_a_p
-@assert variables_1.policy_x == variables_5.policy_x == variables_6.policy_x
-@assert variables_1.policy_l == variables_5.policy_l == variables_6.policy_l
+@assert variables_1.V[:,:,:,:,2,48] == variables_5.V[:,:,:,:,2,48] == variables_7.V[:,:,:,:,2,48]
+@assert variables_1.policy_a_p == variables_5.policy_a_p
+@assert variables_1.policy_x == variables_5.policy_x
+@assert variables_1.policy_l == variables_5.policy_l
 
 @btime sol_1!($variables_1, $parameters)
 # @btime sol_2!($variables_2, $parameters)
 # @btime sol_3!($variables_3, $parameters)
 # @btime sol_4!($variables_4, $parameters)
 @btime sol_5!($variables_5, $parameters)
-@btime sol_6!($variables_6, $parameters)
+# @btime sol_6!($variables_6, $parameters)
+@btime sol_7!($variables_7, $parameters)
+
+
+
+
+
+
