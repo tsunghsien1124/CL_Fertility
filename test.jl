@@ -726,6 +726,150 @@ function sol_7!(variables::Mutable_Variables, parameters::NamedTuple)
     nothing
 end
 
+function sol_8!(variables::Mutable_Variables, parameters::NamedTuple)
+    # Unpack parameters
+    @unpack age_size, age_grid, age_max, age_ret, age_inf = parameters
+    @unpack ν_size, ν_grid, ν_Γ = parameters
+    @unpack ϵ_size, ϵ_grid, ϵ_Γ = parameters
+    @unpack n_size, n_grid, n_Γ, n_max = parameters
+    @unpack a_size, a_grid = parameters
+    @unpack l_size, l_grid, x_size, x_grid = parameters
+    @unpack inf_size, inf_grid = parameters
+    @unpack h_grid = parameters
+    @unpack b, r, γ, ψ, κ, β, μ, θ, ψ_1, ψ_2, q_bar, q_x = parameters
+
+    age_i = 48
+    age = age_grid[age_i]
+    age_ret_i = findfirst(parameters.age_grid .== parameters.age_ret)
+    h = age > age_ret ? h_grid[age_ret_i] : h_grid[age_i]
+
+    if age == age_ret # At retirement age
+        for ν_i in 1:ν_size
+            @views ν = ν_grid[ν_i]
+            for ϵ_i in 1:ϵ_size
+                @views ϵ = ϵ_grid[ϵ_i]
+                w = exp(h + ϵ + ν)
+                for n_i in 1:n_size
+                    @views n = n_grid[n_i]
+                    for a_i in 1:a_size
+                        @views a = a_grid[a_i]
+                        if n == 0
+                            @views EV = variables.V[:, 1, ϵ_i, ν_i, 2, age_i+1]
+                            V_all = utility_function.((1.0 + r) * a .+ w .- a_grid, n, 0.0, γ, ψ, κ, q_bar) .+ β .* EV
+                            V_max_i = argmax(V_all)
+                            @inbounds begin
+                                variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_all[V_max_i]
+                                variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_max_i
+                            end
+                        else
+                            Sol_all_i = 0
+                            V_best = -Inf
+                            best_a_p_i, best_x_i, best_l_i = 0, 0, 0
+                            for a_p_i in 1:a_size
+                                @views a_p = a_grid[a_p_i]
+                                for x_i in 1:x_size
+                                    @views x = x_grid[x_i]
+                                    for l_i in 1:l_size
+                                        @views l = l_grid[l_i]
+                                        q = quality_function(x, l, n, μ, θ, ψ_1, ψ_2)
+                                        temp = utility_function((1.0 + r) * a + (1.0 - l) * w - a_p - q_x * x, n, q, γ, ψ, κ, q_bar) +
+                                               β * variables.V[a_p_i, 1, ϵ_i, ν_i, 2, age_i+1]
+                                        if temp > V_best
+                                            V_best = temp
+                                            best_a_p_i = a_p_i
+                                            best_x_i = x_i
+                                            best_l_i = l_i
+                                        end
+                                        Sol_all_i += 1
+                                    end
+                                end
+                            end
+                            @inbounds begin
+                                variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_best
+                                variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_a_p_i
+                                variables.policy_x[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_x_i
+                                variables.policy_l[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_l_i
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    nothing
+end
+function sol_9!(variables::Mutable_Variables, parameters::NamedTuple)
+    # Unpack parameters
+    @unpack age_size, age_grid, age_max, age_ret, age_inf = parameters
+    @unpack ν_size, ν_grid, ν_Γ = parameters
+    @unpack ϵ_size, ϵ_grid, ϵ_Γ = parameters
+    @unpack n_size, n_grid, n_Γ, n_max = parameters
+    @unpack a_size, a_grid = parameters
+    @unpack l_size, l_grid, x_size, x_grid = parameters
+    @unpack inf_size, inf_grid = parameters
+    @unpack h_grid = parameters
+    @unpack b, r, γ, ψ, κ, β, μ, θ, ψ_1, ψ_2, q_bar, q_x = parameters
+
+    age_i = 48
+    age = age_grid[age_i]
+    age_ret_i = findfirst(parameters.age_grid .== parameters.age_ret)
+    h = ifelse(age > age_ret, h_grid[age_ret_i], h_grid[age_i])
+
+    if age == age_ret # At retirement age
+        for ν_i in 1:ν_size
+            @views ν = ν_grid[ν_i]
+            for ϵ_i in 1:ϵ_size
+                @views ϵ = ϵ_grid[ϵ_i]
+                w = exp(h + ϵ + ν)
+                for n_i in 1:n_size
+                    @views n = n_grid[n_i]
+                    for a_i in 1:a_size
+                        @views a = a_grid[a_i]
+                        if n == 0
+                            @views EV = variables.V[:, 1, ϵ_i, ν_i, 2, age_i+1]
+                            V_all = similar(EV)  # Ensure V_all is correctly initialized
+                            @inbounds @. V_all = utility_function((1.0 + r) * a + w - a_grid, n, 0.0, γ, ψ, κ, q_bar) + β * EV
+                            V_max_i = argmax(V_all)
+                            @inbounds begin
+                                variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_all[V_max_i]
+                                variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_max_i
+                            end
+                        else
+                            V_best = -Inf
+                            best_a_p_i, best_x_i, best_l_i = 0, 0, 0
+                            for a_p_i in 1:a_size
+                                a_p = a_grid[a_p_i]
+                                for x_i in 1:x_size
+                                    x = x_grid[x_i]
+                                    for l_i in 1:l_size
+                                        l = l_grid[l_i]
+                                        q = quality_function(x, l, n, μ, θ, ψ_1, ψ_2)
+                                        temp = utility_function((1.0 + r) * a + (1.0 - l) * w - a_p - q_x * x, n, q, γ, ψ, κ, q_bar) +
+                                               β * variables.V[a_p_i, 1, ϵ_i, ν_i, 2, age_i+1]
+                                        if temp > V_best
+                                            V_best = temp
+                                            best_a_p_i = a_p_i
+                                            best_x_i = x_i
+                                            best_l_i = l_i
+                                        end
+                                    end
+                                end
+                            end
+                            @inbounds begin
+                                variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_best
+                                variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_a_p_i
+                                variables.policy_x[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_x_i
+                                variables.policy_l[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_l_i
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    nothing
+end
+
 
 variables_1 = variables_function(parameters)
 # variables_2 = variables_function(parameters)
@@ -734,6 +878,8 @@ variables_1 = variables_function(parameters)
 variables_5 = variables_function(parameters)
 # variables_6 = variables_function(parameters)
 variables_7 = variables_function(parameters)
+variables_8 = variables_function(parameters)
+variables_9 = variables_function(parameters)
 
 sol_1!(variables_1, parameters)
 # sol_2!(variables_2, parameters)
@@ -742,16 +888,18 @@ sol_1!(variables_1, parameters)
 sol_5!(variables_5, parameters)
 # sol_6!(variables_6, parameters)
 sol_7!(variables_7, parameters)
+sol_8!(variables_8, parameters)
+sol_9!(variables_9, parameters)
 
 # @assert variables_1.V[:,:,:,:,2,48] == variables_2.V[:,:,:,:,2,48] == variables_3.V[:,:,:,:,2,48] == variables_4.V[:,:,:,:,2,48]
 # @assert variables_1.policy_a_p == variables_2.policy_a_p == variables_3.policy_a_p == variables_4.policy_a_p
 # @assert variables_1.policy_x == variables_2.policy_x == variables_3.policy_x == variables_4.policy_x
 # @assert variables_1.policy_l == variables_2.policy_l == variables_3.policy_l == variables_4.policy_l
 
-@assert variables_1.V[:,:,:,:,2,48] == variables_5.V[:,:,:,:,2,48] == variables_7.V[:,:,:,:,2,48]
-@assert variables_1.policy_a_p == variables_5.policy_a_p
-@assert variables_1.policy_x == variables_5.policy_x
-@assert variables_1.policy_l == variables_5.policy_l
+@assert variables_1.V[:,:,:,:,2,48] == variables_5.V[:,:,:,:,2,48] == variables_7.V[:,:,:,:,2,48] == variables_8.V[:,:,:,:,2,48] == variables_9.V[:,:,:,:,2,48]
+# @assert variables_1.policy_a_p == variables_5.policy_a_p
+# @assert variables_1.policy_x == variables_5.policy_x
+# @assert variables_1.policy_l == variables_5.policy_l
 
 @btime sol_1!($variables_1, $parameters)
 # @btime sol_2!($variables_2, $parameters)
@@ -760,6 +908,9 @@ sol_7!(variables_7, parameters)
 @btime sol_5!($variables_5, $parameters)
 # @btime sol_6!($variables_6, $parameters)
 @btime sol_7!($variables_7, $parameters)
+@btime sol_8!($variables_8, $parameters)
+@btime sol_9!($variables_9, $parameters)
+
 
 
 
