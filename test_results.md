@@ -161,3 +161,13 @@ new (0807) - w/ Threads.@threads, new algo for all n, reshape
 2.918 s (9856829 allocations: 12.48 GiB) [outside reshape, sum, inbounds/views]
 2.918 s (9856829 allocations: 12.48 GiB) [outside reshape, sum, inbounds/views]
 2.823 s (9841433 allocations: 12.48 GiB) [outside-most reshape, sum, inbounds/views]
+
+446.508 ms (6892 allocations: 45.85 MiB)
+456.918 ms (6712 allocations: 45.83 MiB)
+458.209 ms (6712 allocations: 45.83 MiB)
+449.036 ms (6841 allocations: 45.85 MiB)
+451.049 ms (6841 allocations: 45.85 MiB)
+907.349 ms (6841 allocations: 45.85 MiB)
+898.166 ms (6841 allocations: 45.85 MiB)
+897.428 ms (6841 allocations: 45.85 MiB) [80~64]
+9.448 s (9165 allocations: 46.12 MiB) [80~46]
