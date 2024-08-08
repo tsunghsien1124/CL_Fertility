@@ -368,23 +368,23 @@ end
 #     return temp
 # end
 
-function EV_func(c::Float64, age_i::Integer, ϵ_i::Integer, a_p_i::Integer, variables::Mutable_Variables, parameters::NamedTuple)
-    @unpack ν_size, ϵ_size, γ, ψ, κ, q_bar, β, ϵ_Γ, ν_Γ = parameters
-    temp = utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar)
-    for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size
-        @inbounds temp += β * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, 1, ϵ_p_i, ν_p_i, 2, age_i+1]
-    end
-    return temp
-end
+# function EV_func(c::Float64, age_i::Integer, ϵ_i::Integer, a_p_i::Integer, variables::Mutable_Variables, parameters::NamedTuple)
+#     @unpack ν_size, ϵ_size, γ, ψ, κ, q_bar, β, ϵ_Γ, ν_Γ = parameters
+#     temp = utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar)
+#     for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size
+#         @inbounds temp += β * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, 1, ϵ_p_i, ν_p_i, 2, age_i+1]
+#     end
+#     return temp
+# end
 
-function EV_func(c::Float64, n, q::Float64, age_i::Integer, n_i::Integer, ϵ_i::Integer, a_p_i::Integer, variables::Mutable_Variables, parameters::NamedTuple)
-    @unpack ν_size, ϵ_size, n_size, γ, ψ, κ, q_bar, β, ϵ_Γ, ν_Γ, n_Γ = parameters
-    temp = utility_function(c, n, q, γ, ψ, κ, q_bar)
-    for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size, n_p_i = 1:n_size
-        @inbounds temp += β * n_Γ[n_i, n_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, n_p_i, ϵ_p_i, ν_p_i, 2, age_i+1]
-    end
-    return temp
-end
+# function EV_func(c::Float64, n, q::Float64, age_i::Integer, n_i::Integer, ϵ_i::Integer, a_p_i::Integer, variables::Mutable_Variables, parameters::NamedTuple)
+#     @unpack ν_size, ϵ_size, n_size, γ, ψ, κ, q_bar, β, ϵ_Γ, ν_Γ, n_Γ = parameters
+#     temp = utility_function(c, n, q, γ, ψ, κ, q_bar)
+#     for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size, n_p_i = 1:n_size
+#         @inbounds temp += β * n_Γ[n_i, n_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, n_p_i, ϵ_p_i, ν_p_i, 2, age_i+1]
+#     end
+#     return temp
+# end
 
 function solve_value_and_policy_function!(variables::Mutable_Variables, parameters::NamedTuple)
     """
@@ -403,43 +403,47 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
     @unpack b, r, γ, ψ, κ, β, μ, θ, ψ_1, ψ_2, q_bar, q_x = parameters
 
     # index 
-    ind_ret_max = collect(Iterators.product(1:ν_size, 1:ϵ_size, 1:a_size))
+    ind_max_ret = collect(Iterators.product(1:ν_size, 1:ϵ_size, 1:a_size))
     ind_ret_inf = collect(Iterators.product(1:ν_size, 1:ϵ_size, 1:n_size, 1:a_size))
     ind_ret_inf_EV = collect(Iterators.product(1:ϵ_size, 1:n_size, 1:a_size))
+    ind_inf_min = collect(Iterators.product(1:inf_size, 1:ν_size, 1:ϵ_size, 1:n_size, 1:a_size))
 
     # container
     c_a = Array{Float64}(undef, (a_size, a_size))
     for a_i = 1:a_size, a_p_i = 1:a_size
-        c_a[a_i,a_p_i] = (1.0 + r) * a_grid[a_i] - a_grid[a_p_i]
+        c_a[a_i, a_p_i] = (1.0 + r) * a_grid[a_i] - a_grid[a_p_i]
     end 
     EV = Array{Float64}(undef, (a_size, n_size, ϵ_size))
+    EV_inf = Array{Float64}(undef, (a_size, n_size, ϵ_size, inf_size))
 
     # loop over all states
     # for age_i = age_size:(-1):(age_ret-age_min+2)
-    for age_i = age_size:(-1):(age_inf-age_min+2)
+    for age_i = age_size:(-1):(age_inf-age_min+1)
     # for age_i = age_size:(-1):(age_ret-age_min)
         age = age_grid[age_i]
         h = h_grid[age_i]
         println("Solving the problem of HH at age $age...")
         if age == age_max # terminal condition
-            Threads.@threads for (ν_i, ϵ_i, a_i) in ind_ret_max
+            Threads.@threads for (ν_i, ϵ_i, a_i) in ind_max_ret
                 ν = ν_grid[ν_i]
                 ϵ = ϵ_grid[ϵ_i]
                 w_bar = exp(h + ϵ + ν) * b
-                a = a_grid[a_i]
-                @inbounds variables.V[a_i, 1, ϵ_i, ν_i, 2, age_i] = utility_function((1.0 + r) * a + w_bar, 0.0, 0.0, γ, ψ, κ, q_bar)
+                # a = a_grid[a_i]
+                # @inbounds variables.V[a_i, 1, ϵ_i, ν_i, 2, age_i] = utility_function((1.0 + r) * a + w_bar, 0.0, 0.0, γ, ψ, κ, q_bar)
+                @inbounds variables.V[a_i, 1, ϵ_i, ν_i, 2, age_i] = utility_function(c_a[a_i, 1] + w_bar, 0.0, 0.0, γ, ψ, κ, q_bar)
             end
         elseif age_ret < age < age_max # after retirement
-            Threads.@threads for (ν_i, ϵ_i, a_i) in ind_ret_max
+            Threads.@threads for (ν_i, ϵ_i, a_i) in ind_max_ret
                 ν = ν_grid[ν_i]
                 ϵ = ϵ_grid[ϵ_i]
                 w_bar = exp(h + ϵ + ν) * b
-                a = a_grid[a_i]
+                # a = a_grid[a_i]
                 V_best = -Inf
                 best_a_p_i = 1
                 for a_p_i in 1:a_size
-                    a_p = a_grid[a_p_i]
-                    c = (1.0 + r) * a + w_bar - a_p
+                    # a_p = a_grid[a_p_i]
+                    # c = (1.0 + r) * a + w_bar - a_p
+                    @inbounds c = c_a[a_i, a_p_i] + w_bar
                     if c > 0.0
                         temp = utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar) + β * variables.V[a_p_i, 1, ϵ_i, ν_i, 2, age_i+1]
                         if temp > V_best
@@ -457,13 +461,14 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
                 ϵ = ϵ_grid[ϵ_i]
                 w = exp(h + ϵ + ν)
                 n = n_grid[n_i]
-                a = a_grid[a_i]
+                # a = a_grid[a_i]
                 if n == 0
                     V_best = -Inf
                     best_a_p_i = 1
                     for a_p_i in 1:a_size
-                        a_p = a_grid[a_p_i]
-                        c = (1.0 + r) * a + w - a_p
+                        # a_p = a_grid[a_p_i]
+                        # c = (1.0 + r) * a + w - a_p
+                        @inbounds c = c_a[a_i, a_p_i] + w
                         if c > 0.0
                             @inbounds temp = utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar) + β * variables.V[a_p_i, 1, ϵ_i, ν_i, 2, age_i+1]
                             if temp > V_best
@@ -478,10 +483,11 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
                     V_best = -Inf
                     best_a_p_i, best_x_i, best_l_i = 1, 1, 1
                     for a_p_i in 1:a_size, x_i in 1:x_size, l_i in 1:l_size
-                        a_p = a_grid[a_p_i]
+                        # a_p = a_grid[a_p_i]
                         x = x_grid[x_i]
                         l = l_grid[l_i]
-                        c = (1.0 + r) * a + (1.0 - l) * w - a_p - q_x * x
+                        # c = (1.0 + r) * a + (1.0 - l) * w - a_p - q_x * x
+                        @inbounds c = c_a[a_i, a_p_i] + (1.0 - l) * w - q_x * x
                         if c > 0.0
                             q = quality_function(x, l, n, μ, θ, ψ_1, ψ_2)
                             if q >= q_bar
@@ -512,14 +518,15 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
                 ν = ν_grid[ν_i]
                 ϵ = ϵ_grid[ϵ_i]
                 n = n_grid[n_i]
-                a = a_grid[a_i]
+                # a = a_grid[a_i]
                 w = exp(h + ϵ + ν)
                 if n == 0
                     V_best = -Inf
                     best_a_p_i = 1
                     for a_p_i = 1:a_size
-                        a_p = a_grid[a_p_i]
-                        c = (1.0 + r) * a + w - a_p
+                        # a_p = a_grid[a_p_i]
+                        # c = (1.0 + r) * a + w - a_p
+                        @inbounds c = c_a[a_i, a_p_i] + w
                         if c > 0.0
                             temp = utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar) + β * EV[a_p_i, n_i, ϵ_i]
                             if temp > V_best
@@ -534,10 +541,11 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
                     V_best = -Inf
                     best_a_p_i, best_x_i, best_l_i = 1, 1, 1
                     for a_p_i in 1:a_size, x_i in 1:x_size, l_i in 1:l_size
-                        a_p = a_grid[a_p_i]
+                        # a_p = a_grid[a_p_i]
                         x = x_grid[x_i]
                         l = l_grid[l_i]
-                        c = (1.0 + r) * a + (1.0 - l) * w - a_p - q_x * x
+                        # c = (1.0 + r) * a + (1.0 - l) * w - a_p - q_x * x
+                        @inbounds c = c_a[a_i, a_p_i] + (1.0 - l) * w - q_x * x
                         if c > 0.0
                             q = quality_function(x, l, n, μ, θ, ψ_1, ψ_2)
                             if q >= q_bar
@@ -558,7 +566,13 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
                 end
             end
         elseif age == age_inf # about to be infertile
-            Threads.@threads for (f_i, ν_i, ϵ_i, n_i, a_i) in collect(Iterators.product(1:inf_size, 1:ν_size, 1:ϵ_size, 1:n_size, 1:a_size))
+            @inbounds EV .= 0.0
+            Threads.@threads for (ϵ_i, n_i, a_p_i) in ind_ret_inf_EV
+                for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size, n_p_i = 1:n_size
+                    @inbounds EV[a_p_i, n_i, ϵ_i] += n_Γ[n_i, n_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, n_p_i, ϵ_p_i, ν_p_i, 2, age_i+1]
+                end
+            end
+            Threads.@threads for (f_i, ν_i, ϵ_i, n_i, a_i) in ind_inf_min
                 # for f_i = 1:inf_size, ν_i = 1:ν_size, ϵ_i = 1:ϵ_size, n_i = 1:n_size, a_i = 1:a_size
                 ν = ν_grid[ν_i]
                 ϵ = ϵ_grid[ϵ_i]
@@ -902,6 +916,7 @@ end
 # policy_l_no_inf_risk = variables_no_inf_risk.policy_l
 # policy_K_no_inf_risk = variables_no_inf_risk.policy_K
 # @save "workspace_no_inf_risk.jld2" parameters_no_inf_risk V_no_inf_risk policy_a_p_no_inf_risk policy_x_no_inf_risk policy_l_no_inf_risk policy_K_no_inf_risk
+
 
 
 

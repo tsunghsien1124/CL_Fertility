@@ -173,3 +173,15 @@ new (0807) - w/ Threads.@threads, new algo for all n, reshape
 9.448 s (9165 allocations: 46.12 MiB) [80~46]
 9.184 s (9272 allocations: 46.14 MiB)
 9.081 s (9167 allocations: 46.14 MiB)
+
+[c precomputation]
+9.041 s (9272 allocations: 46.14 MiB)
+9.129 s (12054 allocations: 46.33 MiB)
+9.235 s (9167 allocations: 46.14 MiB)
+9.147 s (9167 allocations: 46.14 MiB)
+9.115 s (9167 allocations: 46.14 MiB)
+9.233 s (9271 allocations: 46.14 MiB)
+9.165 s (12144 allocations: 46.33 MiB)
+9.161 s (9170 allocations: 46.72 MiB)
+
+11.910 s (9880702 allocations: 10.24 GiB) [80~45]
