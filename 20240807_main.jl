@@ -241,6 +241,7 @@ function parameters_function(;
         2.509402
     ]
     h_grid = h_function(data_h, age_min, age_max)
+    h_grid[(age_ret-age_min+2):end] .= h_grid[age_ret-age_min+1]
     h_size = length(h_grid)
     if h_edu == 1
         h_grid[1:4] .= h_grid[1] * 0.6
@@ -347,7 +348,7 @@ function variables_function(parameters::NamedTuple)
     # unpack parameters
     @unpack inf_size, a_size, n_size, ϵ_size, ν_size, age_size = parameters
 
-    # define value and policy functions: (a,n,ϵ,ν,f,d,t)
+    # define value and policy functions: (a,n,ϵ,ν,f,d,age)
     V = zeros(a_size, n_size, ϵ_size, ν_size, inf_size, age_size)
     policy_a_p = ones(Int, a_size, n_size, ϵ_size, ν_size, inf_size, age_size)
     policy_x = ones(Int, a_size, n_size, ϵ_size, ν_size, inf_size, age_size)
@@ -359,13 +360,39 @@ function variables_function(parameters::NamedTuple)
     return variables
 end
 
+# function EV_func(a_p_i::Integer, γ::Float64, ψ::Float64, κ::Float64, q_bar::Float64, β::Float64, ϵ_Γ::Array{Float64, 2}, ν_Γ::Array{Float64, 2})
+#     temp = 0.0
+#     for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size
+#         @inbounds temp += utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar) + β * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, 1, ϵ_p_i, ν_p_i, 2, age_i+1]
+#     end
+#     return temp
+# end
+
+function EV_func(c::Float64, age_i::Integer, ϵ_i::Integer, a_p_i::Integer, variables::Mutable_Variables, parameters::NamedTuple)
+    @unpack ν_size, ϵ_size, γ, ψ, κ, q_bar, β, ϵ_Γ, ν_Γ = parameters
+    temp = 0.0
+    for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size
+        @inbounds temp += utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar) + β * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, 1, ϵ_p_i, ν_p_i, 2, age_i+1]
+    end
+    return temp
+end
+
+function EV_func(c::Float64, n, q::Float64, age_i::Integer, n_i::Integer, ϵ_i::Integer, a_p_i::Integer, variables::Mutable_Variables, parameters::NamedTuple)
+    @unpack ν_size, ϵ_size, n_size, γ, ψ, κ, q_bar, β, ϵ_Γ, ν_Γ, n_Γ = parameters
+    temp = 0.0
+    for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size, n_p_i = 1:n_size
+        @inbounds temp += utility_function(c, n, q, γ, ψ, κ, q_bar) + β * n_Γ[n_i, n_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, n_p_i, ϵ_p_i, ν_p_i, 2, age_i+1]
+    end
+    return temp
+end
+
 function solve_value_and_policy_function!(variables::Mutable_Variables, parameters::NamedTuple)
     """
     Compute value and policy functions
     """
 
     # unpack parameters
-    @unpack age_size, age_grid, age_max, age_ret, age_inf = parameters
+    @unpack age_size, age_grid, age_max, age_min, age_ret, age_inf = parameters
     @unpack ν_size, ν_grid, ν_Γ = parameters
     @unpack ϵ_size, ϵ_grid, ϵ_Γ = parameters
     @unpack n_size, n_grid, n_Γ, n_max = parameters
@@ -375,72 +402,170 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
     @unpack h_grid = parameters
     @unpack b, r, γ, ψ, κ, β, μ, θ, ψ_1, ψ_2, q_bar, q_x = parameters
 
+    # index 
+    ind_ret_max = collect(Iterators.product(1:ν_size, 1:ϵ_size, 1:a_size))
+    ind_ret_inf = collect(Iterators.product(1:ν_size, 1:ϵ_size, 1:n_size, 1:a_size))
+
     # loop over all states
-    for age_i = age_size:(-1):1
+    # for age_i = age_size:(-1):(age_ret-age_min+2)
+    for age_i = age_size:(-1):(age_inf-age_min+2)
         age = age_grid[age_i]
-        age_ret_i = findall(parameters.age_grid .== parameters.age_ret)[]
-        age > age_ret ? h = h_grid[age_ret_i] : h = h_grid[age_i]
+        h = h_grid[age_i]
         println("Solving the problem of HH at age $age...")
         if age == age_max # terminal condition
-            Threads.@threads for (ν_i, ϵ_i, a_i) in collect(Iterators.product(1:ν_size, 1:ϵ_size, 1:a_size))
+            # for ν_i = 1:ν_size
+            #     ν = ν_grid[ν_i]
+            #     for ϵ_i = 1:ϵ_size
+            #         ϵ = ϵ_grid[ϵ_i]
+            #         w_bar = exp(h + ϵ + ν) * b
+            #         for a_i = 1:a_size
+            #             a = a_grid[a_i]
+            #             @inbounds variables.V[a_i, 1, ϵ_i, ν_i, 2, age_i] = utility_function((1.0 + r) * a + w_bar, 0.0, 0.0, γ, ψ, κ, q_bar)
+            #         end
+            #     end
+            # end
+            Threads.@threads for (ν_i, ϵ_i, a_i) in ind_ret_max
                 # for ν_i = 1:ν_size, ϵ_i = 1:ϵ_size, a_i = 1:a_size
                 ν = ν_grid[ν_i]
                 ϵ = ϵ_grid[ϵ_i]
-                a = a_grid[a_i]
                 w_bar = exp(h + ϵ + ν) * b
+                a = a_grid[a_i]
                 @inbounds variables.V[a_i, 1, ϵ_i, ν_i, 2, age_i] = utility_function((1.0 + r) * a + w_bar, 0.0, 0.0, γ, ψ, κ, q_bar)
             end
         elseif age_ret < age < age_max # after retirement
-            Threads.@threads for (ν_i, ϵ_i, a_i) in collect(Iterators.product(1:ν_size, 1:ϵ_size, 1:a_size))
+            # for ν_i = 1:ν_size
+            #     ν = ν_grid[ν_i]
+            #     for ϵ_i = 1:ϵ_size
+            #         ϵ = ϵ_grid[ϵ_i]
+            #         w_bar = exp(h + ϵ + ν) * b
+            #         for a_i = 1:a_size
+            #             a = a_grid[a_i]
+            #             V_best = -Inf
+            #             best_a_p_i = 0
+            #             for a_p_i in 1:a_size
+            #                 a_p = a_grid[a_p_i]
+            #                 temp = utility_function((1.0 + r) * a + w_bar - a_p, 0.0, 0.0, γ, ψ, κ, q_bar) + β * variables.V[a_p_i, 1, ϵ_i, ν_i, 2, age_i+1]
+            #                 if temp > V_best
+            #                     V_best = temp
+            #                     best_a_p_i = a_p_i
+            #                 end
+            #             end
+            #             @inbounds variables.V[a_i, 1, ϵ_i, ν_i, 2, age_i] = V_best
+            #             @inbounds variables.policy_a_p[a_i, 1, ϵ_i, ν_i, 2, age_i] = best_a_p_i
+            #         end
+            #     end
+            # end
+            Threads.@threads for (ν_i, ϵ_i, a_i) in ind_ret_max
                 # for ν_i = 1:ν_size, ϵ_i = 1:ϵ_size, a_i = 1:a_size
                 ν = ν_grid[ν_i]
                 ϵ = ϵ_grid[ϵ_i]
-                a = a_grid[a_i]
                 w_bar = exp(h + ϵ + ν) * b
-                EV = variables.V[:, 1, ϵ_i, ν_i, 2, age_i+1]
-                V_all = utility_function.((1.0 + r) * a + w_bar .- a_grid, 0.0, 0.0, γ, ψ, κ, q_bar) .+ β * EV
-                V_max_i = argmax(V_all)
-                @inbounds variables.V[a_i, 1, ϵ_i, ν_i, 2, age_i] = V_all[V_max_i]
-                @inbounds variables.policy_a_p[a_i, 1, ϵ_i, ν_i, 2, age_i] = V_max_i # a_grid[V_max_i]
+                a = a_grid[a_i]
+                V_best = -Inf
+                best_a_p_i = 1
+                for a_p_i in 1:a_size
+                    a_p = a_grid[a_p_i]
+                    temp = utility_function((1.0 + r) * a + w_bar - a_p, 0.0, 0.0, γ, ψ, κ, q_bar) + β * variables.V[a_p_i, 1, ϵ_i, ν_i, 2, age_i+1]
+                    if temp > V_best
+                        V_best = temp
+                        best_a_p_i = a_p_i
+                    end
+                end
+                @inbounds variables.V[a_i, 1, ϵ_i, ν_i, 2, age_i] = V_best
+                @inbounds variables.policy_a_p[a_i, 1, ϵ_i, ν_i, 2, age_i] = best_a_p_i
             end
         elseif age == age_ret # at retirement age
-            Threads.@threads for (ν_i, ϵ_i, n_i, a_i) in collect(Iterators.product(1:ν_size, 1:ϵ_size, 1:n_size, 1:a_size))
-                # for ν_i = 1:ν_size, ϵ_i = 1:ϵ_size, n_i = 1:n_size, a_i = 1:a_size
+            # for ν_i = 1:ν_size
+            #     ν = ν_grid[ν_i]
+            #     for ϵ_i = 1:ϵ_size
+            #         ϵ = ϵ_grid[ϵ_i]
+            #         w = exp(h + ϵ + ν)
+            #         for n_i = 1:n_size
+            #             n = n_grid[n_i]
+            #             for a_i = 1:a_size
+            #                 a = a_grid[a_i]
+            #                 if n == 0
+            #                     V_best = -Inf
+            #                     best_a_p_i = 0
+            #                     for a_p_i in 1:a_size
+            #                         a_p = a_grid[a_p_i]
+            #                         temp = utility_function((1.0 + r) * a + w - a_p, 0.0, 0.0, γ, ψ, κ, q_bar) + β * variables.V[a_p_i, 1, ϵ_i, ν_i, 2, age_i+1]
+            #                         if temp > V_best
+            #                             V_best = temp
+            #                             best_a_p_i = a_p_i
+            #                         end
+            #                     end
+            #                     @inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_best
+            #                     @inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_a_p_i
+            #                 else
+            #                     V_best = -Inf
+            #                     best_a_p_i, best_x_i, best_l_i = 0, 0, 0
+            #                     for a_p_i in 1:a_size, x_i in 1:x_size, l_i in 1:l_size
+            #                         a_p = a_grid[a_p_i]
+            #                         x = x_grid[x_i]
+            #                         l = l_grid[l_i]
+            #                         q = quality_function(x, l, n, μ, θ, ψ_1, ψ_2)
+            #                         temp = utility_function((1.0 + r) * a + (1.0 - l) * w - a_p - q_x * x, n, q, γ, ψ, κ, q_bar) + β * variables.V[a_p_i, 1, ϵ_i, ν_i, 2, age_i+1]
+            #                         if temp > V_best
+            #                             V_best = temp
+            #                             best_a_p_i = a_p_i
+            #                             best_x_i = x_i
+            #                             best_l_i = l_i
+            #                         end
+            #                     end
+            #                     @inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_best
+            #                     @inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_a_p_i
+            #                     @inbounds variables.policy_x[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_x_i
+            #                     @inbounds variables.policy_l[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_l_i
+            #                 end
+            #             end
+            #         end
+            #     end
+            # end
+            # for ν_i = 1:ν_size, ϵ_i = 1:ϵ_size, n_i = 1:n_size, a_i = 1:a_size
+            Threads.@threads for (ν_i, ϵ_i, n_i, a_i) in ind_ret_inf
                 ν = ν_grid[ν_i]
                 ϵ = ϵ_grid[ϵ_i]
+                w = exp(h + ϵ + ν)
                 n = n_grid[n_i]
                 a = a_grid[a_i]
-                w = exp(h + ϵ + ν)
                 if n == 0
-                    EV = variables.V[:, 1, ϵ_i, ν_i, 2, age_i+1]
-                    V_all = utility_function.((1.0 + r) * a + w .- a_grid, n, 0.0, γ, ψ, κ, q_bar) .+ β * EV
-                    V_max_i = argmax(V_all)
-                    @inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_all[V_max_i]
-                    @inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_max_i # a_grid[V_max_i]
+                    V_best = -Inf
+                    best_a_p_i = 1
+                    for a_p_i in 1:a_size
+                        a_p = a_grid[a_p_i]
+                        @inbounds temp = utility_function((1.0 + r) * a + w - a_p, 0.0, 0.0, γ, ψ, κ, q_bar) + β * variables.V[a_p_i, 1, ϵ_i, ν_i, 2, age_i+1]
+                        if temp > V_best
+                            V_best = temp
+                            best_a_p_i = a_p_i
+                        end
+                    end
+                    @inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_best
+                    @inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_a_p_i
                 else
-                    EV = variables.V[:, 1, ϵ_i, ν_i, 2, age_i+1]
-                    Sol_all = zeros(a_size * x_size * l_size, 4)
-                    Sol_all_i = 0
-                    for a_p_i = 1:a_size, x_i = 1:x_size, l_i = 1:l_size
-                        Sol_all_i += 1
-                        @inbounds Sol_all[Sol_all_i, 1] = a_p_i
-                        @inbounds Sol_all[Sol_all_i, 2] = x_i
-                        @inbounds Sol_all[Sol_all_i, 3] = l_i
-                        a_p = a_grid[a_i]
+                    V_best = -Inf
+                    best_a_p_i, best_x_i, best_l_i = 1, 1, 1
+                    for a_p_i in 1:a_size, x_i in 1:x_size, l_i in 1:l_size
+                        a_p = a_grid[a_p_i]
                         x = x_grid[x_i]
                         l = l_grid[l_i]
                         q = quality_function(x, l, n, μ, θ, ψ_1, ψ_2)
-                        @inbounds Sol_all[Sol_all_i, 4] = utility_function((1.0 + r) * a + (1.0 - l) * w - a_p - q_x * x, n, q, γ, ψ, κ, q_bar) + β * EV[a_p_i]
+                        @inbounds temp = utility_function((1.0 + r) * a + (1.0 - l) * w - a_p - q_x * x, n, q, γ, ψ, κ, q_bar) + β * variables.V[a_p_i, 1, ϵ_i, ν_i, 2, age_i+1]
+                        if temp > V_best
+                            V_best = temp
+                            best_a_p_i = a_p_i
+                            best_x_i = x_i
+                            best_l_i = l_i
+                        end
                     end
-                    V_max_i = argmax(Sol_all[:, 4])
-                    @inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = Sol_all[V_max_i, 4]
-                    @inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = Int(Sol_all[V_max_i, 1]) # a_grid[Int(Sol_all[V_max_i, 1])]
-                    @inbounds variables.policy_x[a_i, n_i, ϵ_i, ν_i, 2, age_i] = Int(Sol_all[V_max_i, 2]) # x_grid[Int(Sol_all[V_max_i, 2])]
-                    @inbounds variables.policy_l[a_i, n_i, ϵ_i, ν_i, 2, age_i] = Int(Sol_all[V_max_i, 3]) # l_grid[Int(Sol_all[V_max_i, 3])]
+                    @inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_best
+                    @inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_a_p_i
+                    @inbounds variables.policy_x[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_x_i
+                    @inbounds variables.policy_l[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_l_i
                 end
             end
         elseif age_inf < age < age_ret # berween infertile age and retirement age
-            Threads.@threads for (ν_i, ϵ_i, n_i, a_i) in collect(Iterators.product(1:ν_size, 1:ϵ_size, 1:n_size, 1:a_size))
+            Threads.@threads for (ν_i, ϵ_i, n_i, a_i) in ind_ret_inf
                 # for ν_i = 1:ν_size, ϵ_i = 1:ϵ_size, n_i = 1:n_size, a_i = 1:a_size
                 ν = ν_grid[ν_i]
                 ϵ = ϵ_grid[ϵ_i]
@@ -448,37 +573,107 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
                 a = a_grid[a_i]
                 w = exp(h + ϵ + ν)
                 if n == 0
-                    EV = zeros(a_size)
-                    for ϵ_p_i = 1:ϵ_size, ν_p_i = 1:ν_size
-                        EV += ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[:, 1, ϵ_p_i, ν_p_i, 2, age_i+1]
+                    # EV = zeros(a_size)
+                    # for ϵ_p_i = 1:ϵ_size, ν_p_i = 1:ν_size
+                    #     EV += ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[:, 1, ϵ_p_i, ν_p_i, 2, age_i+1]
+                    # end
+                    # V_all = utility_function.((1.0 + r) * a + w .- a_grid, n, 0.0, γ, ψ, κ, q_bar) .+ β * EV
+                    # V_max_i = argmax(V_all)
+                    # @inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_all[V_max_i]
+                    # @inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_max_i # a_grid[V_max_i]
+                    # V_best = -Inf
+                    # best_a_p_i = 1
+                    # for a_p_i = 1:a_size
+                    #     a_p = a_grid[a_p_i]
+                    #     c = (1.0 + r) * a + w - a_p
+                    #     if c > 0.0
+                    #         temp = 0.0
+                    #         for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size
+                    #             @inbounds temp += utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar) + β * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, 1, ϵ_p_i, ν_p_i, 2, age_i+1]
+                    #         end
+                    #         if temp > V_best
+                    #             V_best = temp
+                    #             best_a_p_i = a_p_i
+                    #         end
+                    #     end
+                    # end
+                    # @inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_best
+                    # @inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_a_p_i
+
+                    V_best = -Inf
+                    best_a_p_i = 1
+                    for a_p_i = 1:a_size
+                        a_p = a_grid[a_p_i]
+                        c = (1.0 + r) * a + w - a_p
+                        if c > 0.0
+                            temp = EV_func(c, age_i, ϵ_i, a_p_i, variables, parameters)
+                            if temp > V_best
+                                V_best = temp
+                                best_a_p_i = a_p_i
+                            end
+                        end
                     end
-                    V_all = utility_function.((1.0 + r) * a + w .- a_grid, n, 0.0, γ, ψ, κ, q_bar) .+ β * EV
-                    V_max_i = argmax(V_all)
-                    @inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_all[V_max_i]
-                    @inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_max_i # a_grid[V_max_i]
+                    @inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_best
+                    @inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_a_p_i
                 else
-                    EV = zeros(a_size)
-                    for n_p_i = 1:n_size, ϵ_p_i = 1:ϵ_size, ν_p_i = 1:ν_size
-                        EV += n_Γ[n_i, n_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[:, n_p_i, ϵ_p_i, ν_p_i, 2, age_i+1]
-                    end
-                    Sol_all = zeros(a_size * x_size * l_size, 4)
-                    Sol_all_i = 0
-                    for a_p_i = 1:a_size, x_i = 1:x_size, l_i = 1:l_size
-                        Sol_all_i += 1
-                        @inbounds Sol_all[Sol_all_i, 1] = a_p_i
-                        @inbounds Sol_all[Sol_all_i, 2] = x_i
-                        @inbounds Sol_all[Sol_all_i, 3] = l_i
-                        a_p = a_grid[a_i]
+                    # EV = zeros(a_size)
+                    # for n_p_i = 1:n_size, ϵ_p_i = 1:ϵ_size, ν_p_i = 1:ν_size
+                    #     EV += n_Γ[n_i, n_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[:, n_p_i, ϵ_p_i, ν_p_i, 2, age_i+1]
+                    # end
+                    # Sol_all = zeros(a_size * x_size * l_size, 4)
+                    # Sol_all_i = 0
+                    # for a_p_i = 1:a_size, x_i = 1:x_size, l_i = 1:l_size
+                    #     Sol_all_i += 1
+                    #     @inbounds Sol_all[Sol_all_i, 1] = a_p_i
+                    #     @inbounds Sol_all[Sol_all_i, 2] = x_i
+                    #     @inbounds Sol_all[Sol_all_i, 3] = l_i
+                    #     a_p = a_grid[a_i]
+                    #     x = x_grid[x_i]
+                    #     l = l_grid[l_i]
+                    #     q = quality_function(x, l, n, μ, θ, ψ_1, ψ_2)
+                    #     @inbounds Sol_all[Sol_all_i, 4] = utility_function((1.0 + r) * a + (1.0 - l) * w - a_p - q_x * x, n, q, γ, ψ, κ, q_bar) + β * EV[a_p_i]
+                    # end
+                    # V_max_i = argmax(Sol_all[:, 4])
+                    # @inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = Sol_all[V_max_i, 4]
+                    # @inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = Int(Sol_all[V_max_i, 1]) # a_grid[Int(Sol_all[V_max_i, 1])]
+                    # @inbounds variables.policy_x[a_i, n_i, ϵ_i, ν_i, 2, age_i] = Int(Sol_all[V_max_i, 2]) # x_grid[Int(Sol_all[V_max_i, 2])]
+                    # @inbounds variables.policy_l[a_i, n_i, ϵ_i, ν_i, 2, age_i] = Int(Sol_all[V_max_i, 3]) # l_grid[Int(Sol_all[V_max_i, 3])]
+                    V_best = -Inf
+                    best_a_p_i, best_x_i, best_l_i = 1, 1, 1
+                    for a_p_i in 1:a_size, x_i in 1:x_size, l_i in 1:l_size
+                        a_p = a_grid[a_p_i]
                         x = x_grid[x_i]
                         l = l_grid[l_i]
-                        q = quality_function(x, l, n, μ, θ, ψ_1, ψ_2)
-                        @inbounds Sol_all[Sol_all_i, 4] = utility_function((1.0 + r) * a + (1.0 - l) * w - a_p - q_x * x, n, q, γ, ψ, κ, q_bar) + β * EV[a_p_i]
+                        c = (1.0 + r) * a + (1.0 - l) * w - a_p - q_x * x
+                        if c > 0.0
+                            q = quality_function(x, l, n, μ, θ, ψ_1, ψ_2)
+                            if q >= q_bar
+                                # temp = EV_func(c, n, q, age_i, n_i, ϵ_i, a_p_i, variables, parameters)
+                                function EV_temp_func()
+                                    temp = 0.0
+                                    for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size, n_p_i = 1:n_size
+                                        @inbounds temp += utility_function(c, n, q, γ, ψ, κ, q_bar) + β * n_Γ[n_i, n_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, n_p_i, ϵ_p_i, ν_p_i, 2, age_i+1]
+                                    end
+                                    return temp
+                                end
+                                temp = EV_temp_func()
+                                # temp = 0.0
+                                # for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size, n_p_i = 1:n_size
+                                #     @inbounds temp += utility_function(c, n, q, γ, ψ, κ, q_bar) + β * n_Γ[n_i, n_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, n_p_i, ϵ_p_i, ν_p_i, 2, age_i+1]
+                                # end
+                                if temp > V_best
+                                    V_best = temp
+                                    best_a_p_i = a_p_i
+                                    best_x_i = x_i
+                                    best_l_i = l_i
+                                end
+                            end
+                        end
                     end
-                    V_max_i = argmax(Sol_all[:, 4])
-                    @inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = Sol_all[V_max_i, 4]
-                    @inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = Int(Sol_all[V_max_i, 1]) # a_grid[Int(Sol_all[V_max_i, 1])]
-                    @inbounds variables.policy_x[a_i, n_i, ϵ_i, ν_i, 2, age_i] = Int(Sol_all[V_max_i, 2]) # x_grid[Int(Sol_all[V_max_i, 2])]
-                    @inbounds variables.policy_l[a_i, n_i, ϵ_i, ν_i, 2, age_i] = Int(Sol_all[V_max_i, 3]) # l_grid[Int(Sol_all[V_max_i, 3])]
+                    @inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_best
+                    @inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_a_p_i
+                    @inbounds variables.policy_x[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_x_i
+                    @inbounds variables.policy_l[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_l_i
                 end
             end
         elseif age == age_inf # about to be infertile
@@ -792,13 +987,13 @@ end
 #==============================#
 # solve stationary equilibrium #
 #==============================#
-# function solve_all()
-#     parameters = parameters_function()
-#     variables = variables_function(parameters)
-#     solve_value_and_policy_function!(variables, parameters)
-#     return parameters, variables
-# end
-# @btime parameters, variables = solve_all()
+function solve_all()
+    parameters = parameters_function()
+    variables = variables_function(parameters)
+    solve_value_and_policy_function!(variables, parameters)
+    return parameters, variables
+end
+@btime parameters, variables = solve_all();
 
 # V = variables.V
 # policy_a_p = variables.policy_a_p

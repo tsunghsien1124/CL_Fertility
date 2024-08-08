@@ -241,6 +241,7 @@ function parameters_function(;
         2.509402
     ]
     h_grid = h_function(data_h, age_min, age_max)
+    h_grid[(age_ret-age_min+2):end] .= h_grid[age_ret-age_min+1]
     h_size = length(h_grid)
     if h_edu == 1
         h_grid[1:4] .= h_grid[1] * 0.6
@@ -365,7 +366,7 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
     """
 
     # unpack parameters
-    @unpack age_size, age_grid, age_max, age_ret, age_inf = parameters
+    @unpack age_size, age_grid, age_max, age_min, age_ret, age_inf = parameters
     @unpack ν_size, ν_grid, ν_Γ = parameters
     @unpack ϵ_size, ϵ_grid, ϵ_Γ = parameters
     @unpack n_size, n_grid, n_Γ, n_max = parameters
@@ -375,15 +376,18 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
     @unpack h_grid = parameters
     @unpack b, r, γ, ψ, κ, β, μ, θ, ψ_1, ψ_2, q_bar, q_x = parameters
 
+    # index 
+    ind_ret_max = collect(Iterators.product(1:ν_size, 1:ϵ_size, 1:a_size))
+
     # loop over all states
-    for age_i = age_size:(-1):1
+    # for age_i = age_size:(-1):(age_ret-age_min+2)
+    for age_i = age_size:(-1):(age_ret-age_min+2)
         age = age_grid[age_i]
-        age_ret_i = findall(parameters.age_grid .== parameters.age_ret)[]
-        age > age_ret ? h = h_grid[age_ret_i] : h = h_grid[age_i]
+        h = h_grid[age_i]
         println("Solving the problem of HH at age $age...")
         if age == age_max # terminal condition
-            Threads.@threads for (ν_i, ϵ_i, a_i) in collect(Iterators.product(1:ν_size, 1:ϵ_size, 1:a_size))
-                # for ν_i = 1:ν_size, ϵ_i = 1:ϵ_size, a_i = 1:a_size
+            Threads.@threads for (ν_i, ϵ_i, a_i) in ind_ret_max
+            # for ν_i = 1:ν_size, ϵ_i = 1:ϵ_size, a_i = 1:a_size
                 ν = ν_grid[ν_i]
                 ϵ = ϵ_grid[ϵ_i]
                 a = a_grid[a_i]
@@ -391,14 +395,14 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
                 @inbounds variables.V[a_i, 1, ϵ_i, ν_i, 2, age_i] = utility_function((1.0 + r) * a + w_bar, 0.0, 0.0, γ, ψ, κ, q_bar)
             end
         elseif age_ret < age < age_max # after retirement
-            Threads.@threads for (ν_i, ϵ_i, a_i) in collect(Iterators.product(1:ν_size, 1:ϵ_size, 1:a_size))
-                # for ν_i = 1:ν_size, ϵ_i = 1:ϵ_size, a_i = 1:a_size
+            Threads.@threads for (ν_i, ϵ_i, a_i) in ind_ret_max
+            # for ν_i = 1:ν_size, ϵ_i = 1:ϵ_size, a_i = 1:a_size
                 ν = ν_grid[ν_i]
                 ϵ = ϵ_grid[ϵ_i]
                 a = a_grid[a_i]
                 w_bar = exp(h + ϵ + ν) * b
-                EV = variables.V[:, 1, ϵ_i, ν_i, 2, age_i+1]
-                V_all = utility_function.((1.0 + r) * a + w_bar .- a_grid, 0.0, 0.0, γ, ψ, κ, q_bar) .+ β * EV
+                @views EV = variables.V[:, 1, ϵ_i, ν_i, 2, age_i+1]
+                @views V_all = utility_function.((1.0 + r) * a + w_bar .- a_grid, 0.0, 0.0, γ, ψ, κ, q_bar) .+ β * EV
                 V_max_i = argmax(V_all)
                 @inbounds variables.V[a_i, 1, ϵ_i, ν_i, 2, age_i] = V_all[V_max_i]
                 @inbounds variables.policy_a_p[a_i, 1, ϵ_i, ν_i, 2, age_i] = V_max_i # a_grid[V_max_i]
@@ -426,7 +430,7 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
                         @inbounds Sol_all[Sol_all_i, 1] = a_p_i
                         @inbounds Sol_all[Sol_all_i, 2] = x_i
                         @inbounds Sol_all[Sol_all_i, 3] = l_i
-                        a_p = a_grid[a_i]
+                        a_p = a_grid[a_p_i]
                         x = x_grid[x_i]
                         l = l_grid[l_i]
                         q = quality_function(x, l, n, μ, θ, ψ_1, ψ_2)
@@ -792,13 +796,13 @@ end
 #==============================#
 # solve stationary equilibrium #
 #==============================#
-# function solve_all()
-#     parameters = parameters_function()
-#     variables = variables_function(parameters)
-#     solve_value_and_policy_function!(variables, parameters)
-#     return parameters, variables
-# end
-# @btime parameters, variables = solve_all()
+function solve_all()
+    parameters = parameters_function()
+    variables = variables_function(parameters)
+    solve_value_and_policy_function!(variables, parameters)
+    return parameters, variables
+end
+@btime parameters, variables = solve_all()
 
 # V = variables.V
 # policy_a_p = variables.policy_a_p
