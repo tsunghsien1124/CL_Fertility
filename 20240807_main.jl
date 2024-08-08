@@ -370,18 +370,18 @@ end
 
 function EV_func(c::Float64, age_i::Integer, ϵ_i::Integer, a_p_i::Integer, variables::Mutable_Variables, parameters::NamedTuple)
     @unpack ν_size, ϵ_size, γ, ψ, κ, q_bar, β, ϵ_Γ, ν_Γ = parameters
-    temp = 0.0
+    temp = utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar)
     for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size
-        @inbounds temp += utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar) + β * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, 1, ϵ_p_i, ν_p_i, 2, age_i+1]
+        @inbounds temp += β * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, 1, ϵ_p_i, ν_p_i, 2, age_i+1]
     end
     return temp
 end
 
 function EV_func(c::Float64, n, q::Float64, age_i::Integer, n_i::Integer, ϵ_i::Integer, a_p_i::Integer, variables::Mutable_Variables, parameters::NamedTuple)
     @unpack ν_size, ϵ_size, n_size, γ, ψ, κ, q_bar, β, ϵ_Γ, ν_Γ, n_Γ = parameters
-    temp = 0.0
+    temp = utility_function(c, n, q, γ, ψ, κ, q_bar)
     for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size, n_p_i = 1:n_size
-        @inbounds temp += utility_function(c, n, q, γ, ψ, κ, q_bar) + β * n_Γ[n_i, n_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, n_p_i, ϵ_p_i, ν_p_i, 2, age_i+1]
+        @inbounds temp += β * n_Γ[n_i, n_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, n_p_i, ϵ_p_i, ν_p_i, 2, age_i+1]
     end
     return temp
 end
@@ -408,7 +408,8 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
 
     # loop over all states
     # for age_i = age_size:(-1):(age_ret-age_min+2)
-    for age_i = age_size:(-1):(age_inf-age_min+2)
+    # for age_i = age_size:(-1):(age_inf-age_min+2)
+    for age_i = age_size:(-1):(age_ret-age_min)
         age = age_grid[age_i]
         h = h_grid[age_i]
         println("Solving the problem of HH at age $age...")
@@ -565,6 +566,8 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
                 end
             end
         elseif age_inf < age < age_ret # berween infertile age and retirement age
+            @views ν_vec_n_0 = reshape(ν_Γ, (1, ν_size))
+            @views ν_vec = reshape(ν_Γ        , (1, 1, ν_size))
             Threads.@threads for (ν_i, ϵ_i, n_i, a_i) in ind_ret_inf
                 # for ν_i = 1:ν_size, ϵ_i = 1:ϵ_size, n_i = 1:n_size, a_i = 1:a_size
                 ν = ν_grid[ν_i]
@@ -572,6 +575,9 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
                 n = n_grid[n_i]
                 a = a_grid[a_i]
                 w = exp(h + ϵ + ν)
+                @views ϵ_vec_n_0 = reshape(ϵ_Γ[ϵ_i, :], (ϵ_size, 1))
+                @views ϵ_vec = reshape(ϵ_Γ[ϵ_i, :], (1, ϵ_size, 1))
+                @views n_vec = reshape(n_Γ[n_i, :], (n_size, 1, 1))
                 if n == 0
                     # EV = zeros(a_size)
                     # for ϵ_p_i = 1:ϵ_size, ν_p_i = 1:ν_size
@@ -581,15 +587,16 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
                     # V_max_i = argmax(V_all)
                     # @inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_all[V_max_i]
                     # @inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_max_i # a_grid[V_max_i]
+
                     # V_best = -Inf
                     # best_a_p_i = 1
                     # for a_p_i = 1:a_size
                     #     a_p = a_grid[a_p_i]
                     #     c = (1.0 + r) * a + w - a_p
                     #     if c > 0.0
-                    #         temp = 0.0
+                    #         temp = utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar)
                     #         for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size
-                    #             @inbounds temp += utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar) + β * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, 1, ϵ_p_i, ν_p_i, 2, age_i+1]
+                    #             @inbounds temp += β * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, 1, ϵ_p_i, ν_p_i, 2, age_i+1]
                     #         end
                     #         if temp > V_best
                     #             V_best = temp
@@ -606,7 +613,11 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
                         a_p = a_grid[a_p_i]
                         c = (1.0 + r) * a + w - a_p
                         if c > 0.0
-                            temp = EV_func(c, age_i, ϵ_i, a_p_i, variables, parameters)
+                            # temp = EV_func(c, age_i, ϵ_i, a_p_i, variables, parameters)
+
+                            # @views @inbounds temp =  utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar) + β * reduce(+, ϵ_vec .* ν_vec .* variables.V[a_p_i, 1, :, :, 2, age_i+1])
+                            @views @inbounds temp =  utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar) + β * sum(ϵ_vec_n_0 .* ν_vec_n_0 .* variables.V[a_p_i, 1, :, :, 2, age_i+1])
+
                             if temp > V_best
                                 V_best = temp
                                 best_a_p_i = a_p_i
@@ -649,18 +660,26 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
                             q = quality_function(x, l, n, μ, θ, ψ_1, ψ_2)
                             if q >= q_bar
                                 # temp = EV_func(c, n, q, age_i, n_i, ϵ_i, a_p_i, variables, parameters)
-                                function EV_temp_func()
-                                    temp = 0.0
-                                    for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size, n_p_i = 1:n_size
-                                        @inbounds temp += utility_function(c, n, q, γ, ψ, κ, q_bar) + β * n_Γ[n_i, n_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, n_p_i, ϵ_p_i, ν_p_i, 2, age_i+1]
-                                    end
-                                    return temp
-                                end
-                                temp = EV_temp_func()
-                                # temp = 0.0
-                                # for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size, n_p_i = 1:n_size
-                                #     @inbounds temp += utility_function(c, n, q, γ, ψ, κ, q_bar) + β * n_Γ[n_i, n_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, n_p_i, ϵ_p_i, ν_p_i, 2, age_i+1]
+                                
+                                # function EV_temp_func()
+                                #     temp = utility_function(c, n, q, γ, ψ, κ, q_bar)
+                                #     for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size, n_p_i = 1:n_size
+                                #         @inbounds temp += β * n_Γ[n_i, n_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, n_p_i, ϵ_p_i, ν_p_i, 2, age_i+1]
+                                #     end
+                                #     return temp
                                 # end
+                                # temp = EV_temp_func()
+                                
+                                # temp = utility_function(c, n, q, γ, ψ, κ, q_bar)
+                                # for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size, n_p_i = 1:n_size
+                                #     @inbounds temp += β * n_Γ[n_i, n_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, n_p_i, ϵ_p_i, ν_p_i, 2, age_i+1]
+                                # end
+
+                                # @views n_vec = reshape(n_Γ[n_i, :], (n_size, 1, 1))
+                                # @views ϵ_vec = reshape(ϵ_Γ[ϵ_i, :], (1, ϵ_size, 1))
+                                # @views ν_vec = reshape(ν_Γ        , (1, 1, ν_size))
+                                @views @inbounds temp = utility_function(c, n, q, γ, ψ, κ, q_bar) + β * sum(n_vec .* ϵ_vec .* ν_vec .* variables.V[a_p_i, :, :, :, 2, age_i+1])
+
                                 if temp > V_best
                                     V_best = temp
                                     best_a_p_i = a_p_i
@@ -1021,3 +1040,10 @@ end
 # policy_l_no_inf_risk = variables_no_inf_risk.policy_l
 # policy_K_no_inf_risk = variables_no_inf_risk.policy_K
 # @save "workspace_no_inf_risk.jld2" parameters_no_inf_risk V_no_inf_risk policy_a_p_no_inf_risk policy_x_no_inf_risk policy_l_no_inf_risk policy_K_no_inf_risk
+
+
+
+
+
+
+

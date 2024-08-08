@@ -127,3 +127,37 @@ new (0807) - w/ Threads.@threads, new algo for all n
 new (0807) - w/ Threads.@threads, new algo for all n, temp in func
 [near operation]
 115.609 s (14407 allocations: 47.19 MiB) [outside solve function]
+
+# ======= #
+# macbook #
+# ======= #
+
+[80~64]
+new (0807) - w/ Threads.@threads, new algo for all n
+12.438 s (6776 allocations: 45.73 MiB)
+24.673 s (3075608414 allocations: 45.87 GiB) [temp in func near operation]
+12.504 s (6776 allocations: 45.73 MiB) [temp in func outside solve function]
+
+[80~64] typo fixed!
+new (0807) - w/ Threads.@threads, old algo for all n
+1.594 s (3307976 allocations: 3.51 GiB)
+
+new (0807) - w/ Threads.@threads, new algo for all n
+2.687 s (6776 allocations: 45.73 MiB) [temp in func outside solve function]
+2.723 s (6776 allocations: 45.73 MiB) [temp in func outside solve function]
+
+new (0807) - w/ Threads.@threads, new algo for n=0, reshape
+770.961 ms (6827 allocations: 45.73 MiB) [benchmark]
+752.717 ms (142499 allocations: 57.85 MiB) [reshape, reduce+]
+778.980 ms (142499 allocations: 57.85 MiB) [reshape, reduce+]
+767.211 ms (142499 allocations: 57.85 MiB) [reshape, sum]
+
+new (0807) - w/ Threads.@threads, new algo for all n, reshape
+2.709 s (142499 allocations: 57.86 MiB) [benchmark]
+5.058 s (98295140 allocations: 29.89 GiB) [reshape, sum]
+2.988 s (29588291 allocations: 13.37 GiB) [reshape, sum, inbounds/views]
+2.953 s (29510735 allocations: 13.36 GiB) [reshape, sum, inbounds/views]
+2.768 s (9894207 allocations: 12.48 GiB) [outside reshape, sum, inbounds/views]
+2.918 s (9856829 allocations: 12.48 GiB) [outside reshape, sum, inbounds/views]
+2.918 s (9856829 allocations: 12.48 GiB) [outside reshape, sum, inbounds/views]
+2.823 s (9841433 allocations: 12.48 GiB) [outside-most reshape, sum, inbounds/views]
