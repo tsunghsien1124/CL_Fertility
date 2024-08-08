@@ -408,6 +408,10 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
     ind_ret_inf_EV = collect(Iterators.product(1:ϵ_size, 1:n_size, 1:a_size))
 
     # container
+    c_a = Array{Float64}(undef, (a_size, a_size))
+    for a_i = 1:a_size, a_p_i = 1:a_size
+        c_a[a_i,a_p_i] = (1.0 + r) * a_grid[a_i] - a_grid[a_p_i]
+    end 
     EV = Array{Float64}(undef, (a_size, n_size, ϵ_size))
 
     # loop over all states
@@ -898,6 +902,7 @@ end
 # policy_l_no_inf_risk = variables_no_inf_risk.policy_l
 # policy_K_no_inf_risk = variables_no_inf_risk.policy_K
 # @save "workspace_no_inf_risk.jld2" parameters_no_inf_risk V_no_inf_risk policy_a_p_no_inf_risk policy_x_no_inf_risk policy_l_no_inf_risk policy_K_no_inf_risk
+
 
 
 

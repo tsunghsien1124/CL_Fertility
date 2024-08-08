@@ -171,3 +171,5 @@ new (0807) - w/ Threads.@threads, new algo for all n, reshape
 898.166 ms (6841 allocations: 45.85 MiB)
 897.428 ms (6841 allocations: 45.85 MiB) [80~64]
 9.448 s (9165 allocations: 46.12 MiB) [80~46]
+9.184 s (9272 allocations: 46.14 MiB)
+9.081 s (9167 allocations: 46.14 MiB)
