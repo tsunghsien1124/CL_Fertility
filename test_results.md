@@ -185,3 +185,59 @@ new (0807) - w/ Threads.@threads, new algo for all n, reshape
 9.161 s (9170 allocations: 46.72 MiB)
 
 11.910 s (9880702 allocations: 10.24 GiB) [80~45]
+
+[B202]
+[80~46]
+new (0809) - Benchmark
+3.619 s (18998 allocations: 48.20 MiB)
+3.576 s (18995 allocations: 40.80 MiB)
+3.538 s (18995 allocations: 40.80 MiB)
+
+[80~45] only n=0
+3.551 s (19487 allocations: 40.86 MiB)
+3.517 s (19487 allocations: 40.86 MiB)
+
+[80~45] only n=0 and n=n_max
+3.582 s (19487 allocations: 40.86 MiB)
+3.612 s (19487 allocations: 40.86 MiB)
+
+[80~45] only n=0 and n=n_max and other n with f_i = 2 (infertile)
+3.789 s (19487 allocations: 40.86 MiB)
+3.780 s (19487 allocations: 40.86 MiB)
+
+[80~45] all n
+3.902 s (19487 allocations: 40.86 MiB)
+3.957 s (19487 allocations: 40.86 MiB)
+4.205 s (19487 allocations: 40.86 MiB)
+3.969 s (19487 allocations: 40.86 MiB)
+3.917 s (19487 allocations: 40.86 MiB)
+
+[80~44] 44 with only EV_inf
+3.984 s (19982 allocations: 41.16 MiB)
+3.951 s (19982 allocations: 41.16 MiB)
+
+[80~18] 44~18 with only EV_inf
+3.998 s (32776 allocations: 42.79 MiB)
+3.948 s (32776 allocations: 42.79 MiB)
+
+[80~18] 44~18 with EV_inf, n=0
+4.054 s (32777 allocations: 42.89 MiB)
+4.106 s (32776 allocations: 42.89 MiB)
+4.022 s (32776 allocations: 42.89 MiB)
+4.052 s (32776 allocations: 42.87 MiB)
+
+[80~18] 44~18 with EV_inf, n=0, n=n_max
+5.389 s (32777 allocations: 42.97 MiB)
+5.383 s (32776 allocations: 42.97 MiB)
+5.192 s (32776 allocations: 42.97 MiB)
+5.190 s (32776 allocations: 42.97 MiB)
+
+[80~18] 44~18 with EV_inf, n=0, n=n_max, other n with f_i = 2 (infertile)
+9.339 s (32776 allocations: 42.97 MiB)
+9.592 s (32776 allocations: 42.97 MiB)
+
+[80~18] 44~18 with EV_inf, n=0, n=n_max, other n
+13.661 s (32971 allocations: 42.98 MiB)
+13.678 s (33165 allocations: 43.00 MiB)
+
+[80~18] olddest algo [main_gridpoints.jl]
