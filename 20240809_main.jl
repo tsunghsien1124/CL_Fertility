@@ -1159,7 +1159,8 @@ function solve_all()
     solve_value_and_policy_function!(variables, parameters)
     return parameters, variables
 end
-@btime parameters, variables = solve_all();
+parameters, variables = solve_all();
+# @btime parameters, variables = solve_all();
 
 # V = variables.V
 # policy_a_p = variables.policy_a_p

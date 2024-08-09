@@ -241,3 +241,5 @@ new (0809) - Benchmark
 13.678 s (33165 allocations: 43.00 MiB)
 
 [80~18] olddest algo [main_gridpoints.jl]
+683.934 s (90982116783 allocations: 1623.86 GiB) [false]
+866.745 s (514635325 allocations: 434.42 GiB) [true]
