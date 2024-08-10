@@ -1438,7 +1438,6 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
     end
 end
 
-
 #==============================#
 # solve stationary equilibrium #
 #==============================#
