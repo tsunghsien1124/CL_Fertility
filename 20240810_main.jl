@@ -147,6 +147,7 @@ function parameters_function(;
     ϵ_size::Integer=7,              # number of persistent shock
     ν_size::Integer=2,              # number of transitory shock
     a_max::Real=800,                # max of asset holding
+    a_size_neg::Integer=5,          # number of negative asset
     a_size::Integer=50,             # number of asset
     a_degree::Integer=2,            # curvature of asset gridpoints
     q_x::Real=1.0,                  # price of monetary input $x$
@@ -242,7 +243,7 @@ function parameters_function(;
     h_grid[(age_ret-age_min+2):end] .= h_grid[age_ret-age_min+1]
     h_size = length(h_grid)
     if h_edu != 0
-        h[5:end] .= (h[5:end] .+ d_ι)
+        h_grid[5:end] .= (h_grid[5:end] .+ d_ι)
     end
 
     # persistent income shock
@@ -259,17 +260,19 @@ function parameters_function(;
     # asset holding
     if h_edu == 0
         a_grid = ((range(0.0, stop=a_size - 1, length=a_size) / (a_size - 1)) .^ a_degree) * a_max
+        a_ind_zero = 1
     else
-        a_grid_neg = collect(range(a_min, 0.0, length=a_size))
+        a_grid_neg = collect(range(a_min, 0.0, length=a_size_neg))
         a_grid_pos = ((range(0.0, stop=a_size - 1, length=a_size) / (a_size - 1)) .^ a_degree) * a_max
         a_grid = vcat(a_grid_neg, a_grid_pos[2:end])
+        a_ind_zero = a_size_neg
         a_size = length(a_grid)
     end
 
     # child quality inputs
     l_grid = collect(0.0:0.5:1.0)
     l_size = length(l_grid)
-    x_grid = a_grid
+    x_grid = h_edu == 0 ? a_grid : a_grid_pos
     x_size = length(x_grid)
 
     # return values
@@ -319,6 +322,7 @@ function parameters_function(;
         ν_G=ν_G,
         a_min=a_min,
         a_max=a_max,
+        a_ind_zero=a_ind_zero,
         a_size=a_size,
         a_grid=a_grid,
         a_degree=a_degree,
@@ -899,21 +903,21 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
     end
 end
 
-function solve_value_and_policy_function!(variables::Mutable_Variables, parameters::NamedTuple)
+function solve_value_and_policy_edu_function!(variables::Mutable_Variables, parameters::NamedTuple)
     """
-    Compute value and policy functions
+    Compute value and policy functions with education choice
     """
 
     # unpack parameters
-    @unpack age_size, age_grid, age_max, age_min, age_ret, age_inf = parameters
+    @unpack age_size, age_grid, age_max, age_min, age_ret, age_inf, age_edu = parameters
     @unpack ν_size, ν_grid, ν_Γ = parameters
     @unpack ϵ_size, ϵ_grid, ϵ_Γ = parameters
     @unpack n_size, n_grid, n_Γ, n_max = parameters
-    @unpack a_size, a_grid = parameters
+    @unpack a_size, a_grid, a_ind_zero = parameters
     @unpack l_size, l_grid, x_size, x_grid = parameters
     @unpack inf_size, inf_grid = parameters
     @unpack h_grid = parameters
-    @unpack b, r, γ, ψ, κ, β, μ, θ, ψ_1, ψ_2, q_bar, q_x = parameters
+    @unpack b, r, γ, ψ, κ, β, μ, θ, ψ_1, ψ_2, q_bar, q_x, d_κ = parameters
 
     # index 
     ind_max_ret = collect(Iterators.product(1:ν_size, 1:ϵ_size, 1:a_size))
@@ -921,6 +925,8 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
     ind_ret_inf_EV = collect(Iterators.product(1:ϵ_size, 1:n_size, 1:a_size))
     ind_inf_min = collect(Iterators.product(1:inf_size, 1:ν_size, 1:ϵ_size, 1:n_size, 1:a_size))
     ind_inf_min_EV = collect(Iterators.product(1:inf_size, 1:ϵ_size, 1:n_size, 1:a_size))
+    ind_edu = collect(Iterators.product(1:inf_size, 1:ν_size, 1:ϵ_size, 1:a_size))
+    ind_edu_EV = collect(Iterators.product(1:inf_size, 1:ϵ_size, 1:a_size))
 
     # container
     c_a = Array{Float64}(undef, (a_size, a_size))
@@ -929,9 +935,11 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
     end
     EV = Array{Float64}(undef, (a_size, n_size, ϵ_size))
     EV_inf = Array{Float64}(undef, (a_size, n_size, ϵ_size, inf_size))
+    EV_edu = Array{Float64}(undef, (a_size, ϵ_size, inf_size))
 
     # loop over all states
     for age_i = age_size:(-1):1 # (age_inf-age_min)
+        # for age_i = age_size:(-1):(age_ret-age_min+2)
         age = age_grid[age_i]
         h = h_grid[age_i]
         println("Solving the problem of HH at age $age...")
@@ -969,6 +977,7 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
             end
         elseif age == age_ret # at retirement age
             Threads.@threads for (ν_i, ϵ_i, n_i, a_i) in ind_ret_inf
+                # println("($ν_i, $ϵ_i, $n_i, $a_i)")
                 ν = ν_grid[ν_i]
                 ϵ = ϵ_grid[ϵ_i]
                 w = exp(h + ϵ + ν)
@@ -995,6 +1004,7 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
                     V_best = -10^16
                     best_a_p_i, best_x_i, best_l_i = 1, 1, 1
                     for a_p_i in 1:a_size, x_i in 1:x_size, l_i in 1:l_size
+                        # println("($a_p_i, $x_i, $l_i)")
                         # a_p = a_grid[a_p_i]
                         x = x_grid[x_i]
                         l = l_grid[l_i]
@@ -1254,7 +1264,8 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
                     end
                 end
             end
-        else # fertile age
+        elseif age_edu <= age < age_inf # b/w education and fertile age
+
             @inbounds EV_inf .= 0.0
             Threads.@threads for (f_i, ϵ_i, n_i, a_p_i) in ind_inf_min_EV
                 for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size, n_p_i = 1:n_size
@@ -1434,6 +1445,43 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
                     end
                 end
             end
+        elseif age == age_min
+
+            @inbounds EV_edu .= 0.0
+            ϵ_Γ_4 = ϵ_Γ^4
+            no_inf_risk = (1.0 - inf_grid[age_i+1]) * (1.0 - inf_grid[age_i+2]) * (1.0 - inf_grid[age_i+3]) * (1.0 - inf_grid[age_i+4])
+            inf_risk = 1.0 - no_inf_risk
+            Threads.@threads for (f_i, ϵ_i, a_p_i) in ind_edu_EV
+                for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size
+                    if f_i == 1
+                        @inbounds EV_edu[a_p_i, ϵ_i, f_i] += no_inf_risk * ϵ_Γ_4[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, 1, ϵ_p_i, ν_p_i, 1, age_i+4]
+                        @inbounds EV_edu[a_p_i, ϵ_i, f_i] += inf_risk * ϵ_Γ_4[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, 1, ϵ_p_i, ν_p_i, 2, age_i+4]
+                    else
+                        @inbounds EV_edu[a_p_i, ϵ_i, f_i] += ϵ_Γ_4[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, 1, ϵ_p_i, ν_p_i, 2, age_i+4]
+                    end
+                end
+            end
+
+            Threads.@threads for (f_i, ν_i, ϵ_i, a_i) in ind_edu
+                V_best = -10^16
+                best_a_p_i = 1
+                for a_p_i = 1:a_size
+                    a_p = a_grid[a_p_i]
+                    r_kernel = (1.0 + r)^4.0 + (1.0 + r)^3.0 + (1.0 + r)^2.0 + (1.0 + r)
+                    c = (-a_p - d_κ) / r_kernel
+                    if c > 0.0
+                        u_c = utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar)
+                        @inbounds temp = u_c + β * u_c + (β^2.0) * u_c + (β^3.0) * u_c + (β^4.0) * EV_edu[a_p_i, ϵ_i, f_i]
+                        if temp > V_best
+                            V_best = temp
+                            best_a_p_i = a_p_i
+                        end
+                    end
+                end
+                @inbounds variables.V[a_i, 1, ϵ_i, ν_i, f_i, age_i] = V_best
+                @inbounds variables.policy_a_p[a_i, 1, ϵ_i, ν_i, f_i, age_i] = best_a_p_i
+            end
+
         end
     end
 end
@@ -1441,39 +1489,10 @@ end
 #==============================#
 # solve stationary equilibrium #
 #==============================#
-function solve_all()
-    parameters = parameters_function()
-    variables = variables_function(parameters)
-    solve_value_and_policy_function!(variables, parameters)
-    return parameters, variables
-end
-# parameters, variables = solve_all();
-@btime parameters, variables = solve_all();
+parameters = parameters_function()
+variables = variables_function(parameters)
+solve_value_and_policy_function!(variables, parameters)
 
-# V = variables.V
-# policy_a_p = variables.policy_a_p
-# policy_x = variables.policy_x
-# policy_l = variables.policy_l
-# policy_K = variables.policy_K
-# @save "workspace.jld2" parameters V policy_a_p policy_x policy_l policy_K
-
-# parameters_h_edu = parameters_function(h_edu=1)
-# variables_h_edu = variables_function(parameters_h_edu)
-# solve_value_and_policy_function!(variables_h_edu, parameters_h_edu)
-# V_h_edu = variables_h_edu.V
-# policy_a_p_h_edu = variables_h_edu.policy_a_p
-# policy_x_h_edu = variables_h_edu.policy_x
-# policy_l_h_edu = variables_h_edu.policy_l
-# policy_K_h_edu = variables_h_edu.policy_K
-# @save "workspace_h_edu.jld2" parameters_h_edu V_h_edu policy_a_p_h_edu policy_x_h_edu policy_l_h_edu policy_K_h_edu
-
-# parameters_no_inf_risk = parameters_function(h_edu=2)
-# variables_no_inf_risk = variables_function(parameters_no_inf_risk)
-# solve_value_and_policy_function!(variables_no_inf_risk, parameters_no_inf_risk)
-# V_no_inf_risk = variables_no_inf_risk.V
-# policy_a_p_no_inf_risk = variables_no_inf_risk.policy_a_p
-# policy_x_no_inf_risk = variables_no_inf_risk.policy_x
-# policy_l_no_inf_risk = variables_no_inf_risk.policy_l
-# policy_K_no_inf_risk = variables_no_inf_risk.policy_K
-# @save "workspace_no_inf_risk.jld2" parameters_no_inf_risk V_no_inf_risk policy_a_p_no_inf_risk policy_x_no_inf_risk policy_l_no_inf_risk policy_K_no_inf_risk
-
+parameters_edu = parameters_function(h_edu=1)
+variables_edu = variables_function(parameters_edu)
+solve_value_and_policy_edu_function!(variables_edu, parameters_edu)
