@@ -1028,7 +1028,7 @@ end
 # life-cyle earning income
 # plot(parameters.age_min:parameters.age_ret, parameters.h_grid[1:(parameters.age_ret-parameters.age_min+1)], legend=:topleft)
 # plot!(parameters.age_min:parameters.age_ret, parameters_h_edu.h_grid[1:(parameters.age_ret-parameters.age_min+1)], legend=:topleft)
-plot_h = plot(
+plot_h = Plots.plot(
     box=:on,
     size=[800, 500],
     xlim=[18, 65],
@@ -1041,7 +1041,7 @@ plot_h = plot(
     titlefont=font(18, "Computer Modern", :black),
     margin=4mm
 )
-plot_h = plot!(
+plot_h = Plots.plot!(
     parameters.age_min:parameters.age_ret,
     parameters.h_grid[1:(parameters.age_ret-parameters.age_min+1)],
     label="",
