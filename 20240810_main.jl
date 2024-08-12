@@ -68,6 +68,20 @@ function infertility_risk_function(data_age::Array{Int64,1}, data_inf::Array{Flo
     return model_age, model_inf
 end
 
+function infertility_risk_low_function(data_age::Array{Int64,1}, data_inf::Array{Float64,1}, age_min::Integer, age_max::Integer)
+    """
+    Exponential fit of infertility probability, intrapolated on ages up to age_inf
+    """
+    model(t, ω) = ω[1] * exp.(ω[2] * t)
+    ω_int = [0.5, 0.5]
+    fit = curve_fit(model, data_age, data_inf, ω_int)
+    model_age = collect(age_min:age_max)
+    model_inf = fit.param[1] .* exp.(fit.param[2] .* model_age)
+    age_inf = model_age[findlast(model_inf .< 1.0)[]]
+    model_inf[findall(model_age .== (age_inf + 1))[]:end] .= 1.0
+    return model_age, model_inf, age_inf
+end
+
 function h_function(data_h::Array{Float64,1}, age_min::Integer, age_ret::Integer)
     """
     Curve fit of life-cycle component, intrapolated on ages up to age_ret 
@@ -162,13 +176,16 @@ function parameters_function(;
     # infertility parameters: taken from Trussell and Wilson (1985, Population Studies)
     data_inf = [0.07, 0.131, 0.231, 0.345, 0.576, 0.952]
     data_age = [20, 25, 30, 35, 40, 45]
-    age_grid, inf_grid = infertility_risk_function(data_age, data_inf, age_min, age_max, age_inf)
-    age_size = length(age_grid)
-    inf_size = 2
+
     if h_edu == 2
         # inf_grid[1:findall(age_grid .== age_inf)[]] .= (inf_grid[1:findall(age_grid .== age_inf)[]] .* 0.8)
-        inf_grid = inf_grid * 0.8
+        data_inf_new = data_inf * 0.6
+        age_grid, inf_grid, age_inf = infertility_risk_low_function(data_age, data_inf_new, age_min, age_max)
+    else
+        age_grid, inf_grid = infertility_risk_function(data_age, data_inf, age_min, age_max, age_inf)
     end
+    age_size = length(age_grid)
+    inf_size = 2
 
     # education
     a_min = h_edu == 0 ? 0.0 : -10.0
@@ -1797,8 +1814,8 @@ end
 plot_h_edu_mixed = plot(
     box=:on,
     size=[800, 600],
-    xlim=[18, 65],
-    xticks=18:4:65,
+    xlim=[18, 62],
+    xticks=18:4:62,
     ylim=[-0.2, 4.2],
     xtickfont=font(16, "Computer Modern", :black),
     ytickfont=font(16, "Computer Modern", :black),
@@ -1810,14 +1827,14 @@ plot_h_edu_mixed = plot(
 plot_h_edu_mixed = plot!(
     parameters.age_min:parameters.age_ret,
     parameters.h_grid[1:(parameters.age_ret-parameters.age_min+1)],
-    label="",
+    label="Benchmark",
     lw=3,
     lc=:blue
 )
 plot_h_edu_mixed = plot!(
     parameters.age_min:parameters.age_ret,
     vcat(zeros(4),parameters_edu.h_grid[5:(parameters.age_ret-parameters.age_min+1)]),
-    label="",
+    label="Education",
     lw=3,
     lc=:red,
     ls=:dashdot
@@ -1838,7 +1855,7 @@ plot_conception_dist_by_age_mixed = plot(
     size=[800, 600],
     xlim=[18, 45],
     xticks=18:3:45,
-    ylim=[-5,50],
+    ylim=[-5,60],
     xtickfont=font(16, "Computer Modern", :black),
     ytickfont=font(16, "Computer Modern", :black),
     legendfont=font(16, "Computer Modern", :black),
@@ -1849,14 +1866,14 @@ plot_conception_dist_by_age_mixed = plot(
 plot_conception_dist_by_age_mixed = plot!(
     parameters.age_min:parameters.age_inf,
     avg_conception_rate[1:(parameters.age_inf-parameters.age_min+1)],
-    label="",
+    label="Benchmark",
     lw=3,
     lc=:blue
 )
 plot_conception_dist_by_age_mixed = plot!(
     parameters.age_min:parameters.age_inf,
     avg_conception_rate_edu[1:(parameters.age_inf-parameters.age_min+1)],
-    label="",
+    label="Education",
     lw=3,
     lc=:red,
     ls=:dashdot
@@ -1864,9 +1881,141 @@ plot_conception_dist_by_age_mixed = plot!(
 plot_conception_dist_by_age_mixed = plot!(
     parameters.age_min:parameters.age_inf,
     avg_conception_rate_no_inf_risk[1:(parameters.age_inf-parameters.age_min+1)],
-    label="",
+    label="Education, Low Infertility Risk",
     lw=3,
     lc=:black,
     ls=:dash
 )
 savefig(plot_conception_dist_by_age_mixed, string("plot_conception_dist_by_age_mixed.pdf"))
+
+# infertility risk
+plot_inf_risk_mixed = plot(
+    box=:on,
+    size=[800, 600],
+    xlim=[18, 54],
+    xticks=18:3:54,
+    ylim=[-0.05, 1.05],
+    xtickfont=font(16, "Computer Modern", :black),
+    ytickfont=font(16, "Computer Modern", :black),
+    legendfont=font(16, "Computer Modern", :black),
+    guidefont=font(18, "Computer Modern", :black),
+    titlefont=font(18, "Computer Modern", :black),
+    margin=4mm
+)
+plot_inf_risk_mixed = scatter!(
+    parameters.data_age,
+    parameters.data_inf,
+    label="Trussell and Wilson (1985)",
+    markersize = 7,
+    markercolor=:red,
+    markerstrokewidth =0
+)
+plot_inf_risk_mixed = plot!(
+    parameters.age_min:parameters.age_ret,
+    parameters.inf_grid[1:(parameters.age_ret-parameters.age_min+1)],
+    label="Benchmark",
+    lw=3,
+    lc=:blue
+)
+savefig(plot_inf_risk_mixed, string("plot_inf_risk_data.pdf"))
+
+plot_inf_risk_mixed = plot(
+    box=:on,
+    size=[800, 600],
+    xlim=[18, 54],
+    xticks=18:3:54,
+    ylim=[-0.05, 1.05],
+    xtickfont=font(16, "Computer Modern", :black),
+    ytickfont=font(16, "Computer Modern", :black),
+    legendfont=font(16, "Computer Modern", :black),
+    guidefont=font(18, "Computer Modern", :black),
+    titlefont=font(18, "Computer Modern", :black),
+    margin=4mm
+)
+plot_inf_risk_mixed = scatter!(
+    parameters.data_age,
+    parameters.data_inf,
+    label="Trussell and Wilson (1985)",
+    markersize = 7,
+    markercolor=:red,
+    markerstrokewidth =0
+)
+plot_inf_risk_mixed = plot!(
+    parameters.age_min:parameters.age_ret,
+    parameters.inf_grid[1:(parameters.age_ret-parameters.age_min+1)],
+    label="Benchmark",
+    lw=3,
+    lc=:blue
+)
+plot_inf_risk_mixed = plot!(
+    parameters.age_min:parameters.age_ret,
+    parameters_no_inf_risk.inf_grid[1:(parameters.age_ret-parameters.age_min+1)],
+    label="Low Infertility Risk",
+    lw=3,
+    lc=:black,
+    ls=:dash
+)
+savefig(plot_inf_risk_mixed, string("plot_inf_risk_mixed.pdf"))
+
+inf_acc = zeros(parameters.age_size)
+inf_acc_no_risk = zeros(parameters_no_inf_risk.age_size)
+inf_grid_temp = 1.0 .- parameters.inf_grid
+inf_grid_no_risk_temp = 1.0 .- parameters_no_inf_risk.inf_grid
+for age_i = 1:parameters.age_size
+    inf_acc[age_i] = 1.0 - reduce(*, inf_grid_temp[1:age_i])
+    inf_acc_no_risk[age_i] = 1.0 - reduce(*, inf_grid_no_risk_temp[1:age_i]) 
+end
+plot_inf_risk_mixed = plot(
+    box=:on,
+    size=[800, 600],
+    xlim=[18, 54],
+    xticks=18:3:54,
+    ylim=[-0.05, 1.05],
+    xtickfont=font(16, "Computer Modern", :black),
+    ytickfont=font(16, "Computer Modern", :black),
+    legendfont=font(16, "Computer Modern", :black),
+    guidefont=font(18, "Computer Modern", :black),
+    titlefont=font(18, "Computer Modern", :black),
+    margin=4mm,
+    legend=:bottomright
+)
+plot_inf_risk_mixed = plot!(
+    parameters.age_min:parameters.age_ret,
+    inf_acc[1:(parameters.age_ret-parameters.age_min+1)],
+    label="Benchmark",
+    lw=3,
+    lc=:blue
+)
+plot_inf_risk_mixed = plot!(
+    parameters.age_min:parameters.age_ret,
+    inf_acc_no_risk[1:(parameters.age_ret-parameters.age_min+1)],
+    label="Low Infertility Risk",
+    lw=3,
+    lc=:black,
+    ls=:dash
+)
+savefig(plot_inf_risk_mixed, string("plot_inf_risk_mixed_acc.pdf"))
+
+plot_inf_risk_mixed = plot(
+    box=:on,
+    size=[800, 600],
+    xlim=[18, 54],
+    xticks=18:3:54,
+    ylim=[-0.05, 1.05],
+    xtickfont=font(16, "Computer Modern", :black),
+    ytickfont=font(16, "Computer Modern", :black),
+    legendfont=font(16, "Computer Modern", :black),
+    guidefont=font(18, "Computer Modern", :black),
+    titlefont=font(18, "Computer Modern", :black),
+    margin=4mm,
+    legend=:bottomright
+)
+plot_inf_risk_mixed = plot!(
+    parameters.age_min:parameters.age_ret,
+    inf_acc[1:(parameters.age_ret-parameters.age_min+1)],
+    label="Benchmark",
+    lw=3,
+    lc=:blue
+)
+savefig(plot_inf_risk_mixed, string("plot_inf_risk_mixed_acc_ben.pdf"))
+
