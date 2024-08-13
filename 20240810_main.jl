@@ -1822,7 +1822,9 @@ plot_h_edu_mixed = plot(
     legendfont=font(16, "Computer Modern", :black),
     guidefont=font(18, "Computer Modern", :black),
     titlefont=font(18, "Computer Modern", :black),
-    margin=4mm
+    margin=4mm,
+    xlabel="Age",
+    ylabel="Unit Wage"
 )
 plot_h_edu_mixed = plot!(
     parameters.age_min:parameters.age_ret,
@@ -1861,7 +1863,9 @@ plot_conception_dist_by_age_mixed = plot(
     legendfont=font(16, "Computer Modern", :black),
     guidefont=font(18, "Computer Modern", :black),
     titlefont=font(18, "Computer Modern", :black),
-    margin=4mm
+    margin=4mm,
+    xlabel="Age",
+    ylabel="Avg Conception Rate"
 )
 plot_conception_dist_by_age_mixed = plot!(
     parameters.age_min:parameters.age_inf,
@@ -1900,7 +1904,9 @@ plot_inf_risk_mixed = plot(
     legendfont=font(16, "Computer Modern", :black),
     guidefont=font(18, "Computer Modern", :black),
     titlefont=font(18, "Computer Modern", :black),
-    margin=4mm
+    margin=4mm,
+    xlabel="Age",
+    ylabel="Probability"
 )
 plot_inf_risk_mixed = scatter!(
     parameters.data_age,
@@ -1930,7 +1936,10 @@ plot_inf_risk_mixed = plot(
     legendfont=font(16, "Computer Modern", :black),
     guidefont=font(18, "Computer Modern", :black),
     titlefont=font(18, "Computer Modern", :black),
-    margin=4mm
+    margin=4mm,
+    xlabel="Age",
+    ylabel="Probability"
+
 )
 plot_inf_risk_mixed = scatter!(
     parameters.data_age,
@@ -1977,7 +1986,9 @@ plot_inf_risk_mixed = plot(
     guidefont=font(18, "Computer Modern", :black),
     titlefont=font(18, "Computer Modern", :black),
     margin=4mm,
-    legend=:bottomright
+    legend=:bottomright,
+    xlabel="Age",
+    ylabel="Fraction"
 )
 plot_inf_risk_mixed = plot!(
     parameters.age_min:parameters.age_ret,
@@ -2008,7 +2019,9 @@ plot_inf_risk_mixed = plot(
     guidefont=font(18, "Computer Modern", :black),
     titlefont=font(18, "Computer Modern", :black),
     margin=4mm,
-    legend=:bottomright
+    legend=:bottomright,
+    xlabel="Age",
+    ylabel="Fraction"
 )
 plot_inf_risk_mixed = plot!(
     parameters.age_min:parameters.age_ret,
