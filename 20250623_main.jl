@@ -34,6 +34,7 @@ function adda_cooper(N::Integer, ρ::Real, σ::Real; μ::Real=0.0)
             Π[i, j] *= N
         end
     end
+    Π = Π ./ sum(Π, dims=2)
     return z, Π
 end
 
@@ -177,8 +178,8 @@ function parameters_function(;
     ψ::Real=3.50,                   # preference scale
     μ::Real=0.35,                   # production share
     θ::Real=0.70,                   # elasticity of substitution in production
-    q_bar::Real=1.80,               # lower bound on children's consumption # 0.34
-    ψ_1::Real=0.91,                 # HH economies to money inpur ro production
+    q_bar::Real=1.50,               # lower bound on children's consumption # 0.34
+    ψ_1::Real=0.91,                 # HH economies to money input to production
     ψ_2::Real=0.54,                 # HH economies to time input to production
     p::Real=0.02,                   # prob that a child becomes independent
     #====================#
@@ -191,18 +192,20 @@ function parameters_function(;
     age_ret::Integer=65,            # retirement age
     n_max::Integer=4,               # max number of kids
     ϵ_size::Integer=7,              # number of persistent shock
-    ν_size::Integer=3,              # number of transitory shock
-    a_max::Real=800,                # max of asset holding
-    a_size_neg::Integer=5,          # number of negative asset
+    ν_size::Integer=5,              # number of transitory shock
+    a_max::Real=120,                # max of asset holding
+    a_size_neg::Integer=11,         # number of negative asset
     a_size::Integer=50,             # number of asset
-    a_degree::Integer=8,            # curvature of asset gridpoints
+    a_degree::Integer=2,            # curvature of asset gridpoints
     q_x::Real=1.0,                  # price of monetary input $x$
     #=================#
     # case indicators #
     #=================#
-    edu_ind::Integer=0,             # indicator of edu-dependent life-cycle income
     inf_scale::Real=1.0,            # scale of infertility risk
-    σ_ϵ_scale::Real=1.0             # scale of persistent income uncertainty           
+    edu_h_ind::Real=0.0,            # education indicator
+    edu_h_scale::Real=1.0,          # scale of edu-dependent life-cycle income
+    edu_σ_ϵ_scale::Real=1.0,        # scale of persistent income uncertainty    
+    edu_σ_ν_scale::Real=1.0         # scale of transitory income uncertainty
 )
     """
     Contruct an immutable object containg all paramters
@@ -220,9 +223,9 @@ function parameters_function(;
     inf_size = 2
 
     # education
-    a_min = edu_ind == 0 ? 0.0 : -10.0
-    d_κ = 0.1 # need to be updated 
-    d_ι = log(1.25)
+    a_min = edu_h_ind == 0.0 ? 0.0 : -20.0
+    d_κ = 10.0 # need to be updated 
+    d_ι = edu_h_ind == 0.0 ? 0.0 : log(edu_h_scale)
 
     # transition of child dependence
     n_grid = collect(0:n_max)
@@ -298,22 +301,23 @@ function parameters_function(;
     h_grid = h_function(data_h, age_min, age_max)
     h_grid[(age_ret-age_min+2):end] .= h_grid[age_ret-age_min+1]
     h_size = length(h_grid)
-    if edu_ind == 1
-        h_grid[5:end] .= (h_grid[5:end] .+ d_ι)
-    end
+    h_grid[5:end] .= (h_grid[5:end] .+ d_ι)
 
     # persistent income shock
-    ϵ_grid = tauchen_grid(ϵ_size, ρ, σ_ϵ)
-    ϵ_Γ = tauchen_transition_matrix(ϵ_grid, ρ, σ_ϵ * σ_ϵ_scale)
+    ϵ_grid = tauchen_grid(ϵ_size, ρ, σ_ϵ; m=2.0)
+    ϵ_Γ = tauchen_transition_matrix(ϵ_grid, ρ, σ_ϵ * edu_σ_ϵ_scale)
+    # ϵ_grid, ϵ_Γ = adda_cooper(ϵ_size, ρ, σ_ϵ * edu_σ_ϵ_scale)
     ϵ_G = stationary_distributions(MarkovChain(ϵ_Γ, ϵ_grid))[1]
 
     # transitory income shock
-    ν_grid, ν_Γ = adda_cooper(ν_size, 0.0, σ_ν)
+    ν_grid = tauchen_grid(ν_size, 0.0, σ_ν; m=2.0)
+    ν_Γ = tauchen_transition_matrix(ν_grid, 0.0, σ_ν * edu_σ_ν_scale)
+    # ν_grid, ν_Γ = adda_cooper(ν_size, 0.0, σ_ν * edu_σ_ν_scale)
     ν_Γ = ν_Γ[1, :]
     ν_G = ν_Γ
 
     # asset holding
-    if edu_ind == 0
+    if edu_h_ind == 0.0
         a_grid = ((range(0.0, stop=a_size - 1, length=a_size) / (a_size - 1)) .^ a_degree) * a_max
         a_ind_zero = 1
     else
@@ -327,7 +331,7 @@ function parameters_function(;
     # child quality inputs
     l_grid = collect(0.0:0.5:1.0)
     l_size = length(l_grid)
-    x_grid = edu_ind == 0 ? a_grid : a_grid_pos
+    x_grid = edu_h_ind == 0.0 ? a_grid : a_grid_pos
     x_size = length(x_grid)
 
     # return values
@@ -379,6 +383,7 @@ function parameters_function(;
         a_max=a_max,
         a_ind_zero=a_ind_zero,
         a_size=a_size,
+        a_size_neg=a_size_neg,
         a_grid=a_grid,
         a_degree=a_degree,
         l_size=l_size,
@@ -386,9 +391,11 @@ function parameters_function(;
         x_size=x_size,
         x_grid=x_grid,
         q_x=q_x,
-        edu_ind=edu_ind,
         inf_scale=inf_scale,
-        σ_ϵ_scale=σ_ϵ_scale,
+        edu_h_ind=edu_h_ind,
+        edu_h_scale=edu_h_scale,
+        edu_σ_ϵ_scale=edu_σ_ϵ_scale,
+        edu_σ_ν_scale=edu_σ_ν_scale,
     )
 end
 
@@ -1536,10 +1543,9 @@ function solve_value_and_policy_edu_function!(variables::Mutable_Variables, para
                         end
                     end
                 end
-                @inbounds variables.V[a_i, 1, ϵ_i, ν_i, f_i, age_i] = V_best
-                @inbounds variables.policy_a_p[a_i, 1, ϵ_i, ν_i, f_i, age_i] = best_a_p_i
+                @inbounds variables.V[a_i, 1, ϵ_i, ν_i, f_i, age_i:(age_i+3)] .= V_best
+                @inbounds variables.policy_a_p[a_i, 1, ϵ_i, ν_i, f_i, age_i:(age_i+3)] .= best_a_p_i
             end
-
         end
     end
 end
@@ -1558,282 +1564,154 @@ end
 # solve stationary equilibrium #
 #==============================#
 parameters = parameters_function()
-variables = variables_function(parameters)
-solve_value_and_policy_function!(variables, parameters)
-save_JLD_function!(variables, parameters, filename = "workspace_benchmark.jld2")
+# variables = variables_function(parameters)
+# solve_value_and_policy_function!(variables, parameters)
+# save_JLD_function!(variables, parameters, filename = "workspace_benchmark.jld2")
 
-parameters_edu_μ = parameters_function(edu_ind=1)
-variables_edu_μ = variables_function(parameters_edu_μ)
-solve_value_and_policy_edu_function!(variables_edu_μ, parameters_edu_μ)
-save_JLD_function!(variables_edu_μ, parameters_edu_μ, filename = "workspace_edu_μ.jld2")
+parameters_low_inf = parameters_function(inf_scale=0.5)
+# variables_low_inf = variables_function(parameters_low_inf)
+# solve_value_and_policy_function!(variables_low_inf, parameters_low_inf)
+# save_JLD_function!(variables_low_inf, parameters_low_inf, filename = "workspace_low_inf.jld2")
 
-parameters_low_inf = parameters_function(inf_scale=0.6)
-variables_low_inf = variables_function(parameters_low_inf)
-solve_value_and_policy_edu_function!(variables_low_inf, parameters_low_inf)
-save_JLD_function!(variables_low_inf, parameters_low_inf, filename = "workspace_low_inf.jld2")
+parameters_no_inf = parameters_function(inf_scale=0.2)
+# variables_no_inf = variables_function(parameters_no_inf)
+# solve_value_and_policy_function!(variables_no_inf, parameters_no_inf)
+# save_JLD_function!(variables_no_inf, parameters_no_inf, filename = "workspace_no_inf.jld2")
+
+parameters_edu_h = parameters_function(edu_h_ind=1.0, edu_h_scale=1.25, edu_σ_ϵ_scale=3.00, edu_σ_ν_scale=3.00)
+# variables_edu_h = variables_function(parameters_edu_h)
+# solve_value_and_policy_edu_function!(variables_edu_h, parameters_edu_h)
+# save_JLD_function!(variables_edu_h, parameters_edu_h, filename = "workspace_edu_h.jld2")
+
+parameters_edu_h_low_σ = parameters_function(edu_h_ind=1.0, edu_h_scale=1.25, edu_σ_ϵ_scale=1.00, edu_σ_ν_scale=1.00)
+# variables_edu_h_low_σ = variables_function(parameters_edu_h_low_σ)
+# solve_value_and_policy_edu_function!(variables_edu_h_low_σ, parameters_edu_h_low_σ)
+# save_JLD_function!(variables_edu_h_low_σ, parameters_edu_h_low_σ, filename = "workspace_edu_h_low_σ.jld2")
 
 #===========#
 # simuation #
 #===========#
-# load workspace
-@load "workspace.jld2" parameters V policy_a_p policy_x policy_l policy_K
-@load "workspace_edu.jld2" parameters_edu V_edu policy_a_p_edu policy_x_edu policy_l_edu policy_K_edu
-@load "workspace_no_inf_risk.jld2" parameters_no_inf_risk V_no_inf_risk policy_a_p_no_inf_risk policy_x_no_inf_risk policy_l_no_inf_risk policy_K_no_inf_risk
+function simulation_function(;num_hh::Int = 50000, filename::String)
+    """
+    simulate variable panels for a given set of policy functions
+    """
+    # load workspace
+    @load filename parameters V policy_a_p policy_x policy_l policy_K
 
-# size of simulation
-num_hh = 50000
-num_periods = parameters.age_size
+    # set seed
+    Random.seed!(1124)
+    
+    # simulation periods
+    num_periods = parameters.age_size
 
-# set seed
-Random.seed!(1124)
+    # variable panels
+    panel_a = ones(Int, num_hh, num_periods)
+    panel_a_p = ones(Int, num_hh, num_periods)
+    panel_x = ones(num_hh, num_periods)
+    panel_l = ones(Int, num_hh, num_periods)
+    panel_n = ones(Int, num_hh, num_periods)
+    panel_K = ones(Int, num_hh, num_periods)
+    shock_ϵ = zeros(Int, num_hh, num_periods)
+    shock_ν = zeros(Int, num_hh, num_periods)
+    shock_f = zeros(Int, num_hh, num_periods)
 
-# endogenous state or choice variables
-panel_a = ones(Int, num_hh, num_periods)
-panel_a_p = ones(Int, num_hh, num_periods)
-panel_x = ones(num_hh, num_periods)
-panel_l = ones(Int, num_hh, num_periods)
-panel_n = ones(Int, num_hh, num_periods)
-panel_K = ones(Int, num_hh, num_periods)
+    # loop over HHs and Time periods
+    for period_i in 1:num_periods
+        println("Simulating period = $period_i")
+        Threads.@threads for hh_i in 1:num_hh
+            if period_i == 1
 
-panel_a_edu = ones(Int, num_hh, num_periods)
-panel_a_p_edu = ones(Int, num_hh, num_periods)
-panel_x_edu = ones(num_hh, num_periods)
-panel_l_edu = ones(Int, num_hh, num_periods)
-panel_n_edu = ones(Int, num_hh, num_periods)
-panel_K_edu = ones(Int, num_hh, num_periods)
-
-panel_a_no_inf_risk = ones(Int, num_hh, num_periods)
-panel_a_p_no_inf_risk = ones(Int, num_hh, num_periods)
-panel_x_no_inf_risk = ones(num_hh, num_periods)
-panel_l_no_inf_risk = ones(Int, num_hh, num_periods)
-panel_n_no_inf_risk = ones(Int, num_hh, num_periods)
-panel_K_no_inf_risk = ones(Int, num_hh, num_periods)
-
-# exogenous variables
-shock_n = zeros(Int, num_hh, num_periods)
-shock_ϵ = zeros(Int, num_hh, num_periods)
-shock_ν = zeros(Int, num_hh, num_periods)
-shock_f = zeros(Int, num_hh, num_periods)
-
-shock_n_edu = zeros(Int, num_hh, num_periods)
-shock_ϵ_edu = zeros(Int, num_hh, num_periods)
-shock_ν_edu = zeros(Int, num_hh, num_periods)
-shock_f_edu = zeros(Int, num_hh, num_periods)
-
-shock_n_no_inf_risk = zeros(Int, num_hh, num_periods)
-shock_ϵ_no_inf_risk = zeros(Int, num_hh, num_periods)
-shock_ν_no_inf_risk = zeros(Int, num_hh, num_periods)
-shock_f_no_inf_risk = zeros(Int, num_hh, num_periods)
-
-# Loop over HHs and Time periods
-for period_i in 1:parameters.age_size
-    println("Simulating period = $period_i")
-    Threads.@threads for hh_i in 1:num_hh
-        # for hh_i in 1:num_hh
-        if period_i == 1
-
-            @inbounds begin
-                # initiate states
-                panel_a[hh_i, period_i] = 1
-                panel_n[hh_i, period_i] = 1
-                shock_ϵ[hh_i, period_i] = rand(Categorical(vec(parameters.ϵ_G)))
-                shock_ν[hh_i, period_i] = rand(Categorical(vec(parameters.ν_G)))
-                shock_f[hh_i, period_i] = rand(Categorical(vec([1.0 - parameters.inf_grid[period_i], parameters.inf_grid[period_i]])))
-
-                panel_a_edu[hh_i, period_i] = parameters_edu.a_ind_zero
-                panel_n_edu[hh_i, period_i] = 1
-                shock_ϵ_edu[hh_i, period_i] = shock_ϵ[hh_i, period_i]
-                shock_ν_edu[hh_i, period_i] = shock_ν[hh_i, period_i]
-                shock_f_edu[hh_i, period_i] = shock_f[hh_i, period_i]
-
-                panel_a_no_inf_risk[hh_i, period_i] = 1
-                panel_n_no_inf_risk[hh_i, period_i] = 1
-                shock_ϵ_no_inf_risk[hh_i, period_i] = shock_ϵ[hh_i, period_i]
-                shock_ν_no_inf_risk[hh_i, period_i] = shock_ν[hh_i, period_i]
-                shock_f_no_inf_risk[hh_i, period_i] = rand(Categorical(vec([1.0 - parameters_no_inf_risk.inf_grid[period_i], parameters_no_inf_risk.inf_grid[period_i]])))
-
-                # actions
-                panel_a_p[hh_i, period_i] = policy_a_p[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-                # panel_x[hh_i, period_i] = policy_x[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-                # panel_l[hh_i, period_i] = policy_l[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-                panel_K[hh_i, period_i] = policy_K[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-
-                panel_a_p_edu[hh_i, period_i] = policy_a_p_edu[panel_a_edu[hh_i, period_i], panel_n_edu[hh_i, period_i], shock_ϵ_edu[hh_i, period_i], shock_ν_edu[hh_i, period_i], shock_f_edu[hh_i, period_i], period_i]
-                # panel_x_edu[hh_i, period_i] = policy_x_edu[panel_a_edu[hh_i, period_i], panel_n_edu[hh_i, period_i], shock_ϵ_edu[hh_i, period_i], shock_ν_edu[hh_i, period_i], shock_f_edu[hh_i, period_i], period_i]
-                # panel_l_edu[hh_i, period_i] = policy_l_edu[panel_a_edu[hh_i, period_i], panel_n_edu[hh_i, period_i], shock_ϵ_edu[hh_i, period_i], shock_ν_edu[hh_i, period_i], shock_f_edu[hh_i, period_i], period_i]
-                # panel_K_edu[hh_i, period_i] = policy_K_edu[panel_a_edu[hh_i, period_i], panel_n_edu[hh_i, period_i], shock_ϵ_edu[hh_i, period_i], shock_ν_edu[hh_i, period_i], shock_f_edu[hh_i, period_i], period_i]
-
-                panel_a_p_no_inf_risk[hh_i, period_i] = policy_a_p_no_inf_risk[panel_a_no_inf_risk[hh_i, period_i], panel_n_no_inf_risk[hh_i, period_i], shock_ϵ_no_inf_risk[hh_i, period_i], shock_ν_no_inf_risk[hh_i, period_i], shock_f_no_inf_risk[hh_i, period_i], period_i]
-                # panel_x_no_inf_risk[hh_i, period_i] = policy_x_no_inf_risk[panel_a_no_inf_risk[hh_i, period_i], panel_n_no_inf_risk[hh_i, period_i], shock_ϵ_no_inf_risk[hh_i, period_i], shock_ν_no_inf_risk[hh_i, period_i], shock_f_no_inf_risk[hh_i, period_i], period_i]
-                # panel_l_no_inf_risk[hh_i, period_i] = policy_l_no_inf_risk[panel_a_no_inf_risk[hh_i, period_i], panel_n_no_inf_risk[hh_i, period_i], shock_ϵ_no_inf_risk[hh_i, period_i], shock_ν_no_inf_risk[hh_i, period_i], shock_f_no_inf_risk[hh_i, period_i], period_i]
-                # panel_K_no_inf_risk[hh_i, period_i] = policy_K_no_inf_risk[panel_a_no_inf_risk[hh_i, period_i], panel_n_no_inf_risk[hh_i, period_i], shock_ϵ_no_inf_risk[hh_i, period_i], shock_ν_no_inf_risk[hh_i, period_i], shock_f_no_inf_risk[hh_i, period_i], period_i]
-            end
-
-        elseif 1 < period_i < findall(parameters.age_grid .== (parameters.age_inf + 1))[]
-
-            @inbounds begin
-                # initiate states
-                panel_a[hh_i, period_i] = panel_a_p[hh_i, period_i-1]
-                panel_n[hh_i, period_i] = rand(Categorical(vec(parameters.n_Γ[(panel_n[hh_i, period_i-1]+panel_K[hh_i, period_i-1]-1), :])))
-                shock_ϵ[hh_i, period_i] = rand(Categorical(vec(parameters.ϵ_Γ[shock_ϵ[hh_i, period_i-1], :])))
-                shock_ν[hh_i, period_i] = rand(Categorical(vec(parameters.ν_Γ)))
-                shock_f[hh_i, period_i] = shock_f[hh_i, period_i-1] == 2 ? 2 : rand(Categorical(vec([1.0 - parameters.inf_grid[period_i], parameters.inf_grid[period_i]])))
-
-                # actions
-                panel_a_p[hh_i, period_i] = policy_a_p[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-                panel_x[hh_i, period_i] = policy_x[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-                panel_l[hh_i, period_i] = policy_l[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-                panel_K[hh_i, period_i] = policy_K[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-
-                if period_i == 5
+                @inbounds begin
                     # initiate states
-                    panel_a_edu[hh_i, period_i] = panel_a_p_edu[hh_i, 1]
-                    panel_n_edu[hh_i, period_i] = 1
-                    shock_ϵ_edu[hh_i, period_i] = shock_ϵ[hh_i, period_i]
-                    shock_ν_edu[hh_i, period_i] = shock_ν[hh_i, period_i]
-                    shock_f_edu[hh_i, period_i] = shock_f[hh_i, period_i]
-
-                    panel_a_no_inf_risk[hh_i, period_i] = panel_a_p_no_inf_risk[hh_i, period_i-1]
-                    panel_n_no_inf_risk[hh_i, period_i] = 1
-                    shock_ϵ_no_inf_risk[hh_i, period_i] = shock_ϵ[hh_i, period_i]
-                    shock_ν_no_inf_risk[hh_i, period_i] = shock_ν[hh_i, period_i]
-                    prob_no_inf_risk = 1.0 - (1.0 - parameters_no_inf_risk.inf_grid[1]) * (1.0 - parameters_no_inf_risk.inf_grid[2]) * (1.0 - parameters_no_inf_risk.inf_grid[3]) * (1.0 - parameters_no_inf_risk.inf_grid[4]) * (1.0 - parameters_no_inf_risk.inf_grid[5])
-                    shock_f_no_inf_risk[hh_i, period_i] = rand(Categorical(vec([1.0 - prob_no_inf_risk, prob_no_inf_risk])))
+                    panel_a[hh_i, period_i] = 1
+                    panel_n[hh_i, period_i] = 1
+                    shock_ϵ[hh_i, period_i] = rand(Categorical(vec(parameters.ϵ_G)))
+                    shock_ν[hh_i, period_i] = rand(Categorical(vec(parameters.ν_G)))
+                    shock_f[hh_i, period_i] = rand(Categorical(vec([1.0 - parameters.inf_grid[period_i], parameters.inf_grid[period_i]])))
 
                     # actions
-                    panel_a_p_edu[hh_i, period_i] = policy_a_p_edu[panel_a_edu[hh_i, period_i], panel_n_edu[hh_i, period_i], shock_ϵ_edu[hh_i, period_i], shock_ν_edu[hh_i, period_i], shock_f_edu[hh_i, period_i], period_i]
-                    # panel_x_edu[hh_i, period_i] = policy_x_edu[panel_a_edu[hh_i, period_i], panel_n_edu[hh_i, period_i], shock_ϵ_edu[hh_i, period_i], shock_ν_edu[hh_i, period_i], shock_f_edu[hh_i, period_i], period_i]
-                    # panel_l_edu[hh_i, period_i] = policy_l_edu[panel_a_edu[hh_i, period_i], panel_n_edu[hh_i, period_i], shock_ϵ_edu[hh_i, period_i], shock_ν_edu[hh_i, period_i], shock_f_edu[hh_i, period_i], period_i]
-                    panel_K_edu[hh_i, period_i] = policy_K_edu[panel_a_edu[hh_i, period_i], panel_n_edu[hh_i, period_i], shock_ϵ_edu[hh_i, period_i], shock_ν_edu[hh_i, period_i], shock_f_edu[hh_i, period_i], period_i]
-
-                    panel_a_p_no_inf_risk[hh_i, period_i] = policy_a_p_no_inf_risk[panel_a_no_inf_risk[hh_i, period_i], panel_n_no_inf_risk[hh_i, period_i], shock_ϵ_no_inf_risk[hh_i, period_i], shock_ν_no_inf_risk[hh_i, period_i], shock_f_no_inf_risk[hh_i, period_i], period_i]
-                    # panel_x_no_inf_risk[hh_i, period_i] = policy_x_no_inf_risk[panel_a_no_inf_risk[hh_i, period_i], panel_n_no_inf_risk[hh_i, period_i], shock_ϵ_no_inf_risk[hh_i, period_i], shock_ν_no_inf_risk[hh_i, period_i], shock_f_no_inf_risk[hh_i, period_i], period_i]
-                    # panel_l_no_inf_risk[hh_i, period_i] = policy_l_no_inf_risk[panel_a_no_inf_risk[hh_i, period_i], panel_n_no_inf_risk[hh_i, period_i], shock_ϵ_no_inf_risk[hh_i, period_i], shock_ν_no_inf_risk[hh_i, period_i], shock_f_no_inf_risk[hh_i, period_i], period_i]
-                    panel_K_no_inf_risk[hh_i, period_i] = policy_K_no_inf_risk[panel_a_no_inf_risk[hh_i, period_i], panel_n_no_inf_risk[hh_i, period_i], shock_ϵ_no_inf_risk[hh_i, period_i], shock_ν_no_inf_risk[hh_i, period_i], shock_f_no_inf_risk[hh_i, period_i], period_i]
-                elseif period_i > 5
-                    # initiate states
-                    panel_a_edu[hh_i, period_i] = panel_a_p_edu[hh_i, period_i-1]
-                    panel_n_edu[hh_i, period_i] = rand(Categorical(vec(parameters_edu.n_Γ[(panel_n_edu[hh_i, period_i-1]+panel_K_edu[hh_i, period_i-1]-1), :])))
-                    shock_ϵ_edu[hh_i, period_i] = shock_ϵ[hh_i, period_i]
-                    shock_ν_edu[hh_i, period_i] = shock_ν[hh_i, period_i]
-                    shock_f_edu[hh_i, period_i] = shock_f[hh_i, period_i]
-
-                    panel_a_no_inf_risk[hh_i, period_i] = panel_a_p_no_inf_risk[hh_i, period_i-1]
-                    panel_n_no_inf_risk[hh_i, period_i] = rand(Categorical(vec(parameters_no_inf_risk.n_Γ[(panel_n_no_inf_risk[hh_i, period_i-1]+panel_K_no_inf_risk[hh_i, period_i-1]-1), :])))
-                    shock_ϵ_no_inf_risk[hh_i, period_i] = shock_ϵ[hh_i, period_i]
-                    shock_ν_no_inf_risk[hh_i, period_i] = shock_ν[hh_i, period_i]
-                    shock_f_no_inf_risk[hh_i, period_i] = shock_f_no_inf_risk[hh_i, period_i-1] == 2 ? 2 : rand(Categorical(vec([1.0 - parameters_no_inf_risk.inf_grid[period_i], parameters_no_inf_risk.inf_grid[period_i]])))
-
-                    # actions
-                    panel_a_p_edu[hh_i, period_i] = policy_a_p_edu[panel_a_edu[hh_i, period_i], panel_n_edu[hh_i, period_i], shock_ϵ_edu[hh_i, period_i], shock_ν_edu[hh_i, period_i], shock_f_edu[hh_i, period_i], period_i]
-                    panel_x_edu[hh_i, period_i] = policy_x_edu[panel_a_edu[hh_i, period_i], panel_n_edu[hh_i, period_i], shock_ϵ_edu[hh_i, period_i], shock_ν_edu[hh_i, period_i], shock_f_edu[hh_i, period_i], period_i]
-                    panel_l_edu[hh_i, period_i] = policy_l_edu[panel_a_edu[hh_i, period_i], panel_n_edu[hh_i, period_i], shock_ϵ_edu[hh_i, period_i], shock_ν_edu[hh_i, period_i], shock_f_edu[hh_i, period_i], period_i]
-                    panel_K_edu[hh_i, period_i] = policy_K_edu[panel_a_edu[hh_i, period_i], panel_n_edu[hh_i, period_i], shock_ϵ_edu[hh_i, period_i], shock_ν_edu[hh_i, period_i], shock_f_edu[hh_i, period_i], period_i]
-
-                    panel_a_p_no_inf_risk[hh_i, period_i] = policy_a_p_no_inf_risk[panel_a_no_inf_risk[hh_i, period_i], panel_n_no_inf_risk[hh_i, period_i], shock_ϵ_no_inf_risk[hh_i, period_i], shock_ν_no_inf_risk[hh_i, period_i], shock_f_no_inf_risk[hh_i, period_i], period_i]
-                    panel_x_no_inf_risk[hh_i, period_i] = policy_x_no_inf_risk[panel_a_no_inf_risk[hh_i, period_i], panel_n_no_inf_risk[hh_i, period_i], shock_ϵ_no_inf_risk[hh_i, period_i], shock_ν_no_inf_risk[hh_i, period_i], shock_f_no_inf_risk[hh_i, period_i], period_i]
-                    panel_l_no_inf_risk[hh_i, period_i] = policy_l_no_inf_risk[panel_a_no_inf_risk[hh_i, period_i], panel_n_no_inf_risk[hh_i, period_i], shock_ϵ_no_inf_risk[hh_i, period_i], shock_ν_no_inf_risk[hh_i, period_i], shock_f_no_inf_risk[hh_i, period_i], period_i]
-                    panel_K_no_inf_risk[hh_i, period_i] = policy_K_no_inf_risk[panel_a_no_inf_risk[hh_i, period_i], panel_n_no_inf_risk[hh_i, period_i], shock_ϵ_no_inf_risk[hh_i, period_i], shock_ν_no_inf_risk[hh_i, period_i], shock_f_no_inf_risk[hh_i, period_i], period_i]
+                    panel_a_p[hh_i, period_i] = policy_a_p[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
+                    panel_K[hh_i, period_i] = policy_K[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
                 end
-            end
 
-        elseif findall(parameters.age_grid .== (parameters.age_inf + 1))[] <= period_i <= findall(parameters.age_grid .== parameters.age_ret)[]
+            elseif 1 < period_i < findall(parameters.age_grid .== (parameters.age_inf + 1))[]
 
-            @inbounds begin
-                # initiate states
-                panel_a[hh_i, period_i] = panel_a_p[hh_i, period_i-1]
-                panel_n[hh_i, period_i] = rand(Categorical(vec(parameters.n_Γ[(panel_n[hh_i, period_i-1]+panel_K[hh_i, period_i-1]-1), :])))
-                shock_ϵ[hh_i, period_i] = rand(Categorical(vec(parameters.ϵ_Γ[shock_ϵ[hh_i, period_i-1], :])))
-                shock_ν[hh_i, period_i] = rand(Categorical(vec(parameters.ν_Γ)))
-                shock_f[hh_i, period_i] = shock_f[hh_i, period_i-1] == 2 ? 2 : rand(Categorical(vec([1.0 - parameters.inf_grid[period_i], parameters.inf_grid[period_i]])))
-
-                panel_a_edu[hh_i, period_i] = panel_a_p_edu[hh_i, period_i-1]
-                panel_n_edu[hh_i, period_i] = rand(Categorical(vec(parameters_edu.n_Γ[(panel_n_edu[hh_i, period_i-1]+panel_K_edu[hh_i, period_i-1]-1), :])))
-                shock_ϵ_edu[hh_i, period_i] = shock_ϵ[hh_i, period_i]
-                shock_ν_edu[hh_i, period_i] = shock_ν[hh_i, period_i]
-                shock_f_edu[hh_i, period_i] = shock_f[hh_i, period_i]
-
-                panel_a_no_inf_risk[hh_i, period_i] = panel_a_p_no_inf_risk[hh_i, period_i-1]
-                panel_n_no_inf_risk[hh_i, period_i] = rand(Categorical(vec(parameters_no_inf_risk.n_Γ[(panel_n_no_inf_risk[hh_i, period_i-1]+panel_K_no_inf_risk[hh_i, period_i-1]-1), :])))
-                shock_ϵ_no_inf_risk[hh_i, period_i] = shock_ϵ[hh_i, period_i]
-                shock_ν_no_inf_risk[hh_i, period_i] = shock_ν[hh_i, period_i]
-                shock_f_no_inf_risk[hh_i, period_i] = shock_f_no_inf_risk[hh_i, period_i-1] == 2 ? 2 : rand(Categorical(vec([1.0 - parameters_no_inf_risk.inf_grid[period_i], parameters_no_inf_risk.inf_grid[period_i]])))
+                @inbounds begin
+                    # initiate states
+                    panel_a[hh_i, period_i] = panel_a_p[hh_i, period_i-1]
+                    panel_n[hh_i, period_i] = rand(Categorical(vec(parameters.n_Γ[(panel_n[hh_i, period_i-1]+panel_K[hh_i, period_i-1]-1), :])))
+                    shock_ϵ[hh_i, period_i] = rand(Categorical(vec(parameters.ϵ_Γ[shock_ϵ[hh_i, period_i-1], :])))
+                    shock_ν[hh_i, period_i] = rand(Categorical(vec(parameters.ν_Γ)))
+                    shock_f[hh_i, period_i] = shock_f[hh_i, period_i-1] == 2 ? 2 : rand(Categorical(vec([1.0 - parameters.inf_grid[period_i], parameters.inf_grid[period_i]])))
 
                 # actions
-                panel_a_p[hh_i, period_i] = policy_a_p[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-                panel_x[hh_i, period_i] = policy_x[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-                panel_l[hh_i, period_i] = policy_l[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-                panel_K[hh_i, period_i] = policy_K[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
+                    panel_a_p[hh_i, period_i] = policy_a_p[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
+                    panel_x[hh_i, period_i] = policy_x[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
+                    panel_l[hh_i, period_i] = policy_l[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
+                    panel_K[hh_i, period_i] = policy_K[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
+                end
 
-                panel_a_p_edu[hh_i, period_i] = policy_a_p_edu[panel_a_edu[hh_i, period_i], panel_n_edu[hh_i, period_i], shock_ϵ_edu[hh_i, period_i], shock_ν_edu[hh_i, period_i], shock_f_edu[hh_i, period_i], period_i]
-                panel_x_edu[hh_i, period_i] = policy_x_edu[panel_a_edu[hh_i, period_i], panel_n_edu[hh_i, period_i], shock_ϵ_edu[hh_i, period_i], shock_ν_edu[hh_i, period_i], shock_f_edu[hh_i, period_i], period_i]
-                panel_l_edu[hh_i, period_i] = policy_l_edu[panel_a_edu[hh_i, period_i], panel_n_edu[hh_i, period_i], shock_ϵ_edu[hh_i, period_i], shock_ν_edu[hh_i, period_i], shock_f_edu[hh_i, period_i], period_i]
-                panel_K_edu[hh_i, period_i] = policy_K_edu[panel_a_edu[hh_i, period_i], panel_n_edu[hh_i, period_i], shock_ϵ_edu[hh_i, period_i], shock_ν_edu[hh_i, period_i], shock_f_edu[hh_i, period_i], period_i]
+            elseif findall(parameters.age_grid .== (parameters.age_inf + 1))[] <= period_i <= findall(parameters.age_grid .== parameters.age_ret)[]
 
-                panel_a_p_no_inf_risk[hh_i, period_i] = policy_a_p_no_inf_risk[panel_a_no_inf_risk[hh_i, period_i], panel_n_no_inf_risk[hh_i, period_i], shock_ϵ_no_inf_risk[hh_i, period_i], shock_ν_no_inf_risk[hh_i, period_i], shock_f_no_inf_risk[hh_i, period_i], period_i]
-                panel_x_no_inf_risk[hh_i, period_i] = policy_x_no_inf_risk[panel_a_no_inf_risk[hh_i, period_i], panel_n_no_inf_risk[hh_i, period_i], shock_ϵ_no_inf_risk[hh_i, period_i], shock_ν_no_inf_risk[hh_i, period_i], shock_f_no_inf_risk[hh_i, period_i], period_i]
-                panel_l_no_inf_risk[hh_i, period_i] = policy_l_no_inf_risk[panel_a_no_inf_risk[hh_i, period_i], panel_n_no_inf_risk[hh_i, period_i], shock_ϵ_no_inf_risk[hh_i, period_i], shock_ν_no_inf_risk[hh_i, period_i], shock_f_no_inf_risk[hh_i, period_i], period_i]
-                panel_K_no_inf_risk[hh_i, period_i] = policy_K_no_inf_risk[panel_a_no_inf_risk[hh_i, period_i], panel_n_no_inf_risk[hh_i, period_i], shock_ϵ_no_inf_risk[hh_i, period_i], shock_ν_no_inf_risk[hh_i, period_i], shock_f_no_inf_risk[hh_i, period_i], period_i]
-            end
+                @inbounds begin
+                    # initiate states
+                    panel_a[hh_i, period_i] = panel_a_p[hh_i, period_i-1]
+                    panel_n[hh_i, period_i] = rand(Categorical(vec(parameters.n_Γ[(panel_n[hh_i, period_i-1]+panel_K[hh_i, period_i-1]-1), :])))
+                    shock_ϵ[hh_i, period_i] = rand(Categorical(vec(parameters.ϵ_Γ[shock_ϵ[hh_i, period_i-1], :])))
+                    shock_ν[hh_i, period_i] = rand(Categorical(vec(parameters.ν_Γ)))
+                    shock_f[hh_i, period_i] = shock_f[hh_i, period_i-1] == 2 ? 2 : rand(Categorical(vec([1.0 - parameters.inf_grid[period_i], parameters.inf_grid[period_i]])))
 
-        elseif findall(parameters.age_grid .== (parameters.age_ret))[] < period_i < parameters.age_size
+                    # actions
+                    panel_a_p[hh_i, period_i] = policy_a_p[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
+                    panel_x[hh_i, period_i] = policy_x[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
+                    panel_l[hh_i, period_i] = policy_l[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
+                    panel_K[hh_i, period_i] = policy_K[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
+                end
 
-            @inbounds begin
-                # initiate states
-                panel_a[hh_i, period_i] = panel_a_p[hh_i, period_i-1]
-                panel_n[hh_i, period_i] = 1
-                shock_ϵ[hh_i, period_i] = shock_ϵ[hh_i, period_i-1]
-                shock_ν[hh_i, period_i] = shock_ν[hh_i, period_i-1]
-                shock_f[hh_i, period_i] = 2
+            elseif findall(parameters.age_grid .== (parameters.age_ret))[] < period_i < parameters.age_size
 
-                panel_a_edu[hh_i, period_i] = panel_a_p_edu[hh_i, period_i-1]
-                panel_n_edu[hh_i, period_i] = 1
-                shock_ϵ_edu[hh_i, period_i] = shock_ϵ[hh_i, period_i]
-                shock_ν_edu[hh_i, period_i] = shock_ν[hh_i, period_i]
-                shock_f_edu[hh_i, period_i] = shock_f[hh_i, period_i]
+                @inbounds begin
+                    # initiate states
+                    panel_a[hh_i, period_i] = panel_a_p[hh_i, period_i-1]
+                    panel_n[hh_i, period_i] = 1
+                    shock_ϵ[hh_i, period_i] = shock_ϵ[hh_i, period_i-1]
+                    shock_ν[hh_i, period_i] = shock_ν[hh_i, period_i-1]
+                    shock_f[hh_i, period_i] = 2
 
-                panel_a_no_inf_risk[hh_i, period_i] = panel_a_p_no_inf_risk[hh_i, period_i-1]
-                panel_n_no_inf_risk[hh_i, period_i] = 1
-                shock_ϵ_no_inf_risk[hh_i, period_i] = shock_ϵ[hh_i, period_i]
-                shock_ν_no_inf_risk[hh_i, period_i] = shock_ν[hh_i, period_i]
-                shock_f_no_inf_risk[hh_i, period_i] = 2
+                    # actions
+                    panel_a_p[hh_i, period_i] = policy_a_p[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
+                end
 
-                # actions
-                panel_a_p[hh_i, period_i] = policy_a_p[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-                panel_a_p_edu[hh_i, period_i] = policy_a_p_edu[panel_a_edu[hh_i, period_i], panel_n_edu[hh_i, period_i], shock_ϵ_edu[hh_i, period_i], shock_ν_edu[hh_i, period_i], shock_f_edu[hh_i, period_i], period_i]
-                panel_a_p_no_inf_risk[hh_i, period_i] = policy_a_p_no_inf_risk[panel_a_no_inf_risk[hh_i, period_i], panel_n_no_inf_risk[hh_i, period_i], shock_ϵ_no_inf_risk[hh_i, period_i], shock_ν_no_inf_risk[hh_i, period_i], shock_f_no_inf_risk[hh_i, period_i], period_i]
-            end
+            else
 
-        else
+                @inbounds begin
+                    # initiate states
+                    panel_a[hh_i, period_i] = panel_a_p[hh_i, period_i-1]
+                    panel_n[hh_i, period_i] = 1
+                    shock_ϵ[hh_i, period_i] = shock_ϵ[hh_i, period_i-1]
+                    shock_ν[hh_i, period_i] = shock_ν[hh_i, period_i-1]
+                    shock_f[hh_i, period_i] = 2
 
-            @inbounds begin
-                # initiate states
-                panel_a[hh_i, period_i] = panel_a_p[hh_i, period_i-1]
-                panel_n[hh_i, period_i] = 1
-                shock_ϵ[hh_i, period_i] = shock_ϵ[hh_i, period_i-1]
-                shock_ν[hh_i, period_i] = shock_ν[hh_i, period_i-1]
-                shock_f[hh_i, period_i] = 2
-
-                panel_a_edu[hh_i, period_i] = panel_a_p_edu[hh_i, period_i-1]
-                panel_n_edu[hh_i, period_i] = 1
-                shock_ϵ_edu[hh_i, period_i] = shock_ϵ[hh_i, period_i]
-                shock_ν_edu[hh_i, period_i] = shock_ν[hh_i, period_i]
-                shock_f_edu[hh_i, period_i] = shock_f[hh_i, period_i]
-
-                panel_a_no_inf_risk[hh_i, period_i] = panel_a_p_no_inf_risk[hh_i, period_i-1]
-                panel_n_no_inf_risk[hh_i, period_i] = 1
-                shock_ϵ_no_inf_risk[hh_i, period_i] = shock_ϵ[hh_i, period_i]
-                shock_ν_no_inf_risk[hh_i, period_i] = shock_ν[hh_i, period_i]
-                shock_f_no_inf_risk[hh_i, period_i] = 2
-
-                # actions
-                panel_a_p[hh_i, period_i] = 1
-                panel_a_p_edu[hh_i, period_i] = parameters_edu.a_ind_zero
-                panel_a_p_no_inf_risk[hh_i, period_i] = parameters_edu.a_ind_zero
+                    # actions
+                    panel_a_p[hh_i, period_i] = parameters.a_ind_zero
+                end
             end
         end
     end
+    return panel_a, panel_a_p, panel_x, panel_l, panel_n, panel_K, shock_ϵ, shock_ν, shock_f
 end
+
+num_hh = 200000
+
+panel_a, panel_a_p, panel_x, panel_l, panel_n, panel_K, shock_ϵ, shock_ν, shock_f = simulation_function(num_hh = num_hh, filename = "workspace_benchmark.jld2")
+
+panel_a_low_inf, panel_a_p_low_inf, panel_x_low_inf, panel_l_low_inf, panel_n_low_inf, panel_K_low_inf, shock_ϵ_low_inf, shock_ν_low_inf, shock_f_low_inf = simulation_function(num_hh = num_hh, filename = "workspace_low_inf.jld2")
+
+panel_a_no_inf, panel_a_p_no_inf, panel_x_no_inf, panel_l_no_inf, panel_n_no_inf, panel_K_no_inf, shock_ϵ_no_inf, shock_ν_no_inf, shock_f_no_inf = simulation_function(num_hh = num_hh, filename = "workspace_no_inf.jld2")
+
+panel_a_edu_h, panel_a_p_edu_h, panel_x_edu_h, panel_l_edu_h, panel_n_edu_h, panel_K_edu_h, shock_ϵ_edu_h, shock_ν_edu_h, shock_f_edu_h = simulation_function(num_hh = num_hh, filename = "workspace_edu_h.jld2")
+
+panel_a_edu_h_low_σ, panel_a_p_edu_h_low_σ, panel_x_edu_h_low_σ, panel_l_edu_h_low_σ, panel_n_edu_h_low_σ, panel_K_edu_h_low_σ, shock_ϵ_edu_h_low_σ, shock_ν_edu_h_low_σ, shock_f_edu_h_low_σ = simulation_function(num_hh = num_hh, filename = "workspace_edu_h_low_σ.jld2")
 
 #====================#
 # simulation results #
@@ -1862,7 +1740,7 @@ plot_h_edu_mixed = plot!(
 )
 plot_h_edu_mixed = plot!(
     parameters.age_min:parameters.age_ret,
-    vcat(zeros(4), parameters_edu.h_grid[5:(parameters.age_ret-parameters.age_min+1)]),
+    vcat(zeros(4), parameters_edu_h.h_grid[5:(parameters.age_ret-parameters.age_min+1)]),
     label="Education",
     lw=3,
     lc=:red,
@@ -1872,19 +1750,23 @@ savefig(plot_h_edu_mixed, string("plot_h_edu_mixed.pdf"))
 
 # should be average complete fertility rate, not conception right?
 avg_conception_rate = zeros(parameters.age_size)
-avg_conception_rate_edu = zeros(parameters.age_size)
-avg_conception_rate_no_inf_risk = zeros(parameters.age_size)
+avg_conception_rate_low_inf = zeros(parameters.age_size)
+avg_conception_rate_no_inf = zeros(parameters.age_size)
+avg_conception_rate_edu_h = zeros(parameters.age_size)
+avg_conception_rate_edu_h_low_σ = zeros(parameters.age_size)
 Threads.@threads for t = 1:parameters.age_size
     avg_conception_rate[t] = sum(panel_K[:, t] .- 1) / (num_hh / 1000)
-    avg_conception_rate_edu[t] = sum(panel_K_edu[:, t] .- 1) / (num_hh / 1000)
-    avg_conception_rate_no_inf_risk[t] = sum(panel_K_no_inf_risk[:, t] .- 1) / (num_hh / 1000)
+    avg_conception_rate_low_inf[t] = sum(panel_K_low_inf[:, t] .- 1) / (num_hh / 1000)
+    avg_conception_rate_no_inf[t] = sum(panel_K_no_inf[:, t] .- 1) / (num_hh / 1000)
+    avg_conception_rate_edu_h[t] = sum(panel_K_edu_h[:, t] .- 1) / (num_hh / 1000)
+    avg_conception_rate_edu_h_low_σ[t] = sum(panel_K_edu_h_low_σ[:, t] .- 1) / (num_hh / 1000)
 end
 plot_conception_dist_by_age_mixed = plot(
     box=:on,
     size=[800, 600],
     xlim=[18, 45],
     xticks=18:3:45,
-    ylim=[-5, 60],
+    # ylim=[-5, 60],
     xtickfont=font(16, "Computer Modern", :black),
     ytickfont=font(16, "Computer Modern", :black),
     legendfont=font(16, "Computer Modern", :black),
@@ -1903,19 +1785,27 @@ plot_conception_dist_by_age_mixed = plot!(
 )
 plot_conception_dist_by_age_mixed = plot!(
     parameters.age_min:parameters.age_inf,
-    avg_conception_rate_edu[1:(parameters.age_inf-parameters.age_min+1)],
+    avg_conception_rate_low_inf[1:(parameters.age_inf-parameters.age_min+1)],
+    label="Low Infertility Risk",
+    lw=3,
+    lc=:black,
+    ls=:dash
+)
+plot_conception_dist_by_age_mixed = plot!(
+    parameters.age_min:parameters.age_inf,
+    avg_conception_rate_edu_h[1:(parameters.age_inf-parameters.age_min+1)],
+    label="Education (Low Risk)",
+    lw=3,
+    lc=:green,
+    ls=:dot
+)
+plot_conception_dist_by_age_mixed = plot!(
+    parameters.age_min:parameters.age_inf,
+    avg_conception_rate_edu_h_low_σ[1:(parameters.age_inf-parameters.age_min+1)],
     label="Education",
     lw=3,
     lc=:red,
     ls=:dashdot
-)
-plot_conception_dist_by_age_mixed = plot!(
-    parameters.age_min:parameters.age_inf,
-    avg_conception_rate_no_inf_risk[1:(parameters.age_inf-parameters.age_min+1)],
-    label="Education, Low Infertility Risk",
-    lw=3,
-    lc=:black,
-    ls=:dash
 )
 savefig(plot_conception_dist_by_age_mixed, string("plot_conception_dist_by_age_mixed.pdf"))
 
@@ -1983,7 +1873,7 @@ plot_inf_risk_mixed = plot!(
 )
 plot_inf_risk_mixed = plot!(
     parameters.age_min:parameters.age_ret,
-    parameters_no_inf_risk.inf_grid[1:(parameters.age_ret-parameters.age_min+1)],
+    parameters_low_inf.inf_grid[1:(parameters.age_ret-parameters.age_min+1)],
     label="Low Infertility Risk",
     lw=3,
     lc=:black,
@@ -1992,12 +1882,15 @@ plot_inf_risk_mixed = plot!(
 savefig(plot_inf_risk_mixed, string("plot_inf_risk_mixed.pdf"))
 
 inf_acc = zeros(parameters.age_size)
-inf_acc_no_risk = zeros(parameters_no_inf_risk.age_size)
+inf_acc_low_risk = zeros(parameters_low_inf.age_size)
+inf_acc_no_risk = zeros(parameters_no_inf.age_size)
 inf_grid_temp = 1.0 .- parameters.inf_grid
-inf_grid_no_risk_temp = 1.0 .- parameters_no_inf_risk.inf_grid
+inf_grid_low_inf_temp = 1.0 .- parameters_low_inf.inf_grid
+inf_grid_no_inf_temp = 1.0 .- parameters_no_inf.inf_grid
 for age_i = 1:parameters.age_size
     inf_acc[age_i] = 1.0 - reduce(*, inf_grid_temp[1:age_i])
-    inf_acc_no_risk[age_i] = 1.0 - reduce(*, inf_grid_no_risk_temp[1:age_i])
+    inf_acc_low_risk[age_i] = 1.0 - reduce(*, inf_grid_low_inf_temp[1:age_i])
+    inf_acc_no_risk[age_i] = 1.0 - reduce(*, inf_grid_no_inf_temp[1:age_i])
 end
 plot_inf_risk_mixed = plot(
     box=:on,
@@ -2024,12 +1917,20 @@ plot_inf_risk_mixed = plot!(
 )
 plot_inf_risk_mixed = plot!(
     parameters.age_min:parameters.age_ret,
-    inf_acc_no_risk[1:(parameters.age_ret-parameters.age_min+1)],
+    inf_acc_low_risk[1:(parameters.age_ret-parameters.age_min+1)],
     label="Low Infertility Risk",
     lw=3,
     lc=:black,
     ls=:dash
 )
+# plot_inf_risk_mixed = plot!(
+#     parameters.age_min:parameters.age_ret,
+#     inf_acc_no_risk[1:(parameters.age_ret-parameters.age_min+1)],
+#     label="Low Infertility Risk (Tenth Less)",
+#     lw=3,
+#     lc=:red,
+#     ls=:dashdot
+# )
 savefig(plot_inf_risk_mixed, string("plot_inf_risk_mixed_acc.pdf"))
 
 plot_inf_risk_mixed = plot(
@@ -2056,5 +1957,6 @@ plot_inf_risk_mixed = plot!(
     lc=:blue
 )
 savefig(plot_inf_risk_mixed, string("plot_inf_risk_mixed_acc_ben.pdf"))
+
 
 
