@@ -525,7 +525,7 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
     @unpack ν_size, ν_grid, ν_Γ = parameters
     @unpack ϵ_size, ϵ_grid, ϵ_Γ = parameters
     @unpack n_size, n_grid, n_Γ, n_max = parameters
-    @unpack a_size, a_grid = parameters
+    @unpack a_size, a_grid, a_min = parameters
     @unpack aR_grid, w_grid, w_bar_grid, one_m_γ, inv_one_m_γ, EGM_fac = parameters
     @unpack inf_size, inf_grid = parameters
     @unpack h_grid = parameters
@@ -553,9 +553,9 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
         end
     end
 
-    println("Solving the HH problem after retirement until the second last period (from age $(age_max-1) back to $(age_ret+1))")
+    println("Solving the HH problem after retirement until the second last period (from age $age_ret to $(age_max-1))")
     a_endo = Vector{Float64}(undef, a_size)
-    for age_i = (age_size-1):(-1):(age_ret+1)
+    for age_i = (age_size-1):(-1):(age_ret-age_min+1)
         @views V_current = variables.V[:, 1, :, :, 2, age_i]
         @views V_next = variables.V[:, 1, :, :, 2, age_i+1]
         @views policy_c_current = variables.policy_c[:, 1, :, :, 2, age_i]
@@ -582,7 +582,7 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
             @inbounds for a_i in 1:a_size
                 a = a_grid[a_i]
                 aR = aR_grid[a_i]
-                a_p = (a <= a_endo[1]) ? 0.0 : lininterp(a_endo, a_grid, a)
+                a_p = (a <= a_endo[1]) ? a_min : lininterp(a_endo, a_grid, a)
                 policy_a_p_current_a[a_i] = a_p
                 c  = aR + w_bar - a_p
                 policy_c_current_a[a_i] = c
@@ -590,6 +590,33 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
                 V_current_a[a_i]  = u_CRRA(c, one_m_γ, inv_one_m_γ) + β*V_p
             end
         end
+    end
+
+    println("Solving the HH problem in one period before retirement (at age $(age_ret-1))")
+    age_i = age_ret - age_min
+    @views V_current = variables.V[:, :, :, :, 2, age_i]
+    @views V_next = variables.V[:, 1, :, :, 2, age_i+1]
+    @views policy_c_current = variables.policy_c[:, :, :, :, 2, age_i]
+    @views policy_a_p_current = variables.policy_a_p[:, :, :, :, 2, age_i]
+    for ν_i in 1:ν_size, ϵ_i in 1:ϵ_size, n_i in 1:n_size
+        @inbounds w_bar = w_bar_grid[ϵ_i, ν_i, age_i]
+        V_current_a = @view V_current[:, n_i, ϵ_i, ν_i]
+        V_next_a = @view V_next[:, ϵ_i, ν_i]
+        policy_c_current_a = @views policy_c_current[:, n_i, ϵ_i, ν_i]
+        policy_a_p_current_a = @views policy_a_p_current[:, n_i, ϵ_i, ν_i]
+        @inbounds for a_i in 1:a_size
+            a = a_grid[a_p_i]
+            
+        end
+    end
+
+    println("Solving the HH problem from the infertile age to one period before retirement (from age $age_inf to $(age_ret-1))")
+    for age_i = (age_ret-age_min):(-1):(age_inf-age_min+1)
+        @views V_current = variables.V[:, 1, :, :, 2, age_i]
+        @views V_next = variables.V[:, 1, :, :, 2, age_i+1]
+        @views policy_c_current = variables.policy_c[:, 1, :, :, 2, age_i]
+        @views policy_c_next = variables.policy_c[:, 1, :, :, 2, age_i+1]
+        @views policy_a_p_current = variables.policy_a_p[:, 1, :, :, 2, age_i]
     end
 
     # loop over all states
