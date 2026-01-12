@@ -509,11 +509,11 @@ function variables_function(parameters::NamedTuple)
     @unpack inf_size, a_size, n_size, ϵ_size, ν_size, age_size = parameters
 
     # define value and policy functions: (a,n,ϵ,ν,f,d,age)
-    V = zeros(a_size, ϵ_size, ν_size, n_size, inf_size, age_size)
-    policy_c = zeros(a_size, ϵ_size, ν_size, n_size, inf_size, age_size)
-    policy_a_p = zeros(a_size, ϵ_size, ν_size, n_size, inf_size, age_size)
-    policy_e = zeros(a_size, ϵ_size, ν_size, n_size, inf_size, age_size)
-    policy_K = ones(Int, a_size, ϵ_size, ν_size, n_size, inf_size, age_size)
+    V = zeros(a_size, n_size, ϵ_size, ν_size, inf_size, age_size)
+    policy_c = zeros(a_size, n_size, ϵ_size, ν_size, inf_size, age_size)
+    policy_a_p = zeros(a_size, n_size, ϵ_size, ν_size, inf_size, age_size)
+    policy_e = zeros(a_size, n_size, ϵ_size, ν_size, inf_size, age_size)
+    policy_K = ones(Int, a_size, n_size, ϵ_size, ν_size, inf_size, age_size)
 
     # return outputs
     variables = Mutable_Variables(V, policy_c, policy_a_p, policy_e, policy_K)
@@ -536,6 +536,155 @@ end
     end
 end
 
+@inline function terminal_step!(
+    V_end::AbstractArray{Float64,3},
+    policy_c_end::AbstractArray{Float64,3},
+    parameters::NamedTuple,
+    ν_i::Integer,
+    ϵ_i::Integer
+)
+    V_end_a = @views V_end[:, ϵ_i, ν_i]
+    policy_c_end_a = @views policy_c_end[:, ϵ_i, ν_i]
+
+    @unpack w_grid, aR_grid, one_m_γ, inv_one_m_γ = parameters
+    @inbounds w_bar = w_grid[ϵ_i, ν_i, end]
+
+    @inbounds for i in eachindex(aR_grid)
+        c = aR_grid[i] + w_bar
+        policy_c_end_a[i] = c
+        V_end_a[i] = u_CRRA(c, one_m_γ, inv_one_m_γ)
+    end
+
+    return nothing
+end
+
+function retired_step!(
+    a_endo::Vector{Float64},
+    V_next::AbstractArray{Float64},
+    policy_c_next::AbstractArray{Float64},
+    V_current::AbstractArray{Float64},
+    policy_c_current::AbstractArray{Float64},
+    policy_a_p_current::AbstractArray{Float64},
+    parameters::NamedTuple,
+    ν_i::Integer,
+    ϵ_i::Integer,
+    age_i::Integer
+)
+    V_next_a = @view V_next[:, ϵ_i, ν_i]
+    policy_c_next_a = @views policy_c_next[:, ϵ_i, ν_i]
+
+    V_current_a = @view V_current[:, ϵ_i, ν_i]
+    policy_c_current_a = @views policy_c_current[:, ϵ_i, ν_i]
+    policy_a_p_current_a = @views policy_a_p_current[:, ϵ_i, ν_i]
+
+    @unpack w_grid, a_size, a_grid, a_min, aR_grid, R, EGM_fac, β, one_m_γ, inv_one_m_γ = parameters
+    @inbounds w_bar = w_grid[ϵ_i, ν_i, age_i]
+
+    @inbounds for ap_i in 1:a_size
+        ap = a_grid[ap_i]
+        c = EGM_fac * policy_c_next_a[ap_i]
+        m = c + ap
+        a_endo[ap_i] = (m - w_bar) / R
+    end
+
+    @inbounds for ap_i in 2:a_size
+        if a_endo[ap_i] <= a_endo[ap_i-1]
+            a_endo[ap_i] = nextfloat(a_endo[ap_i-1])
+        end
+    end
+
+    ibind = searchsortedlast(a_grid, a_endo[1])
+
+    if ibind > 0
+        @inbounds for a_i in 1:ibind
+            aR = aR_grid[a_i]
+            ap = a_min
+            c = aR + w_bar - ap
+            policy_a_p_current_a[a_i] = ap
+            policy_c_current_a[a_i] = c
+            V_current_a[a_i] = u_CRRA(c, one_m_γ, inv_one_m_γ) + β * V_next_a[1]
+        end
+    end
+
+    @inbounds for a_i in (ibind+1):a_size
+        a = a_grid[a_i]
+        aR = aR_grid[a_i]
+        ap = lininterp(a_endo, a_grid, a)
+        c = aR + w_bar - ap
+        policy_a_p_current_a[a_i] = ap
+        policy_c_current_a[a_i] = c
+        Vp = lininterp(a_grid, V_next_a, ap)
+        V_current_a[a_i] = u_CRRA(c, one_m_γ, inv_one_m_γ) + β * Vp
+    end
+
+    return nothing
+end
+
+function infertile_step!(
+    a_endo::Vector{Float64},
+    V_next::AbstractArray{Float64},
+    policy_c_next::AbstractArray{Float64},
+    V_current::AbstractArray{Float64},
+    policy_c_current::AbstractArray{Float64},
+    policy_a_p_current::AbstractArray{Float64},
+    parameters::NamedTuple,
+    ν_i::Integer,
+    ϵ_i::Integer,
+    age_i::Integer
+)
+    V_next_a = @view V_next[:, ϵ_i, ν_i]
+    policy_c_next_a = @views policy_c_next[:, ϵ_i, ν_i]
+
+    V_current_a = @view V_current[:, ϵ_i, ν_i]
+    policy_c_current_a = @views policy_c_current[:, ϵ_i, ν_i]
+    policy_a_p_current_a = @views policy_a_p_current[:, ϵ_i, ν_i]
+
+    @unpack w_grid, a_size, a_grid, a_min, aR_grid, R, EGM_fac, q_bar, P_grid, β, one_m_γ, inv_one_m_γ = parameters
+    @inbounds w_bar = w_grid[ϵ_i, ν_i, age_i]
+    @inbounds e_bar = q_bar * P_grid[ϵ_i, ν_i, n_i, h_i]
+
+    @inbounds for ap_i in 1:a_size
+        ap = a_grid[ap_i]
+        c = EGM_fac * policy_c_next_a[ap_i]
+        e = (ζ * (n/P)^(1.0 - κ))^(1.0 / κ) * c^(γ / κ)
+        e_bar = 
+        m = c + ap
+        a_endo[ap_i] = (m - w_bar) / R
+    end
+
+    @inbounds for ap_i in 2:a_size
+        if a_endo[ap_i] <= a_endo[ap_i-1]
+            a_endo[ap_i] = nextfloat(a_endo[ap_i-1])
+        end
+    end
+
+    ibind = searchsortedlast(a_grid, a_endo[1])
+
+    if ibind > 0
+        @inbounds for a_i in 1:ibind
+            aR = aR_grid[a_i]
+            ap = a_min
+            c = aR + w_bar - ap
+            policy_a_p_current_a[a_i] = ap
+            policy_c_current_a[a_i] = c
+            V_current_a[a_i] = u_CRRA(c, one_m_γ, inv_one_m_γ) + β * V_next_a[1]
+        end
+    end
+
+    @inbounds for a_i in (ibind+1):a_size
+        a = a_grid[a_i]
+        aR = aR_grid[a_i]
+        ap = lininterp(a_endo, a_grid, a)
+        c = aR + w_bar - ap
+        policy_a_p_current_a[a_i] = ap
+        policy_c_current_a[a_i] = c
+        Vp = lininterp(a_grid, V_next_a, ap)
+        V_current_a[a_i] = u_CRRA(c, one_m_γ, inv_one_m_γ) + β * Vp
+    end
+
+    return nothing
+end
+
 function solve_value_and_policy_function!(variables::Mutable_Variables, parameters::NamedTuple)
     """
     Compute value and policy functions
@@ -547,7 +696,7 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
     @unpack ϵ_size, ϵ_grid, ϵ_Γ = parameters
     @unpack n_size, n_grid, n_Γ, n_max = parameters
     @unpack a_size, a_grid, a_min = parameters
-    @unpack aR_grid, w_grid, w_bar_grid, one_m_γ, inv_one_m_γ, EGM_fac = parameters
+    @unpack aR_grid, w_grid, one_m_γ, inv_one_m_γ, EGM_fac = parameters
     @unpack inf_size, inf_grid = parameters
     @unpack h_grid = parameters
     @unpack b, r, R, γ, ψ, κ, β, μ, θ, ψ_1, ψ_2, q_bar, q_x = parameters
@@ -561,73 +710,40 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
     # EV_inf = Array{Float64}(undef, (a_size, n_size, ϵ_size, inf_size))
 
     println("Solving the HH problem in the last period (at age $age_max)")
-    @views V_end = variables.V[:, :, :, 1, 2, end]
-    @views policy_c_end = variables.policy_c[:, :, :, 1, 2, end]
+    @views V_end = variables.V[:, 1, :, :, 2, end]
+    @views policy_c_end = variables.policy_c[:, 1, :, :, 2, end]
     for ν_i in 1:ν_size, ϵ_i in 1:ϵ_size
-        @inbounds w_bar = w_bar_grid[ϵ_i, ν_i, end]
-        V_end_a = @view V_end[:, ϵ_i, ν_i]
-        policy_c_end_a = @views policy_c_end[:, ϵ_i, ν_i]
-        @inbounds for a_i in 1:a_size
-            c = aR_grid[a_i] + w_bar
-            policy_c_end_a[a_i] = c
-            V_end_a[a_i] = u_CRRA(c, one_m_γ, inv_one_m_γ)
-        end
+        terminal_step!(V_end, policy_c_end, parameters, ν_i, ϵ_i)
     end
 
     println("Solving the HH problem after retirement until the second last period (from age $age_ret to $(age_max-1))")
     a_endo = Vector{Float64}(undef, a_size)
     for age_i = (age_size-1):(-1):(age_ret-age_min+1)
-        @views V_current = variables.V[:, :, :, 1, 2, age_i]
-        @views V_next = variables.V[:, :, :, 1, 2, age_i+1]
-        @views policy_c_current = variables.policy_c[:, :, :, 1, 2, age_i]
-        @views policy_c_next = variables.policy_c[:, :, :, 1, 2, age_i+1]
-        @views policy_a_p_current = variables.policy_a_p[:, :, :, 1, 2, age_i]
+        @views V_next = variables.V[:, 1, :, :, 2, age_i+1]
+        @views policy_c_next = variables.policy_c[:, 1, :, :, 2, age_i+1]
+        @views V_current = variables.V[:, 1, :, :, 2, age_i]
+        @views policy_c_current = variables.policy_c[:, 1, :, :, 2, age_i]
+        @views policy_a_p_current = variables.policy_a_p[:, 1, :, :, 2, age_i]
         for ν_i in 1:ν_size, ϵ_i in 1:ϵ_size
-            @inbounds w_bar = w_bar_grid[ϵ_i, ν_i, age_i]
-            V_current_a = @view V_current[:, ϵ_i, ν_i]
-            V_next_a = @view V_next[:, ϵ_i, ν_i]
-            policy_c_current_a = @views policy_c_current[:, ϵ_i, ν_i]
-            policy_c_next_a = @views policy_c_next[:, ϵ_i, ν_i]
-            policy_a_p_current_a = @views policy_a_p_current[:, ϵ_i, ν_i]
-            @inbounds for a_p_i in 1:a_size
-                a_p = a_grid[a_p_i]
-                c = EGM_fac * policy_c_next_a[a_p_i]
-                m = c + a_p
-                a_endo[a_p_i] = (m - w_bar) / R
-            end
-            @inbounds for a_p_i in 2:a_size
-                if a_endo[a_p_i] <= a_endo[a_p_i-1]
-                    a_endo[a_p_i] = nextfloat(a_endo[a_p_i-1])
-                end
-            end
-            @inbounds for a_i in 1:a_size
-                a = a_grid[a_i]
-                aR = aR_grid[a_i]
-                a_p = (a <= a_endo[1]) ? a_min : lininterp(a_endo, a_grid, a)
-                policy_a_p_current_a[a_i] = a_p
-                c = aR + w_bar - a_p
-                policy_c_current_a[a_i] = c
-                V_p = lininterp(a_grid, V_next_a, a_p)
-                V_current_a[a_i] = u_CRRA(c, one_m_γ, inv_one_m_γ) + β * V_p
-            end
+            retired_step!(a_endo, V_next, policy_c_next, V_current, policy_c_current, policy_a_p_current, parameters, ν_i, ϵ_i, age_i)
         end
     end
 
-    println("Solving the HH problem in one period before retirement (at age $(age_ret-1))")
+    println("Solving the HH problem just before retirement (at age $(age_ret-1))")
     age_i = age_ret - age_min
-    @views V_current = variables.V[:, :, :, :, 2, age_i]
     @views V_next = variables.V[:, 1, :, :, 2, age_i+1]
+    @views policy_c_next = variables.policy_c[:, 1, :, :, 2, age_i+1]
+    @views V_current = variables.V[:, :, :, :, 2, age_i]
     @views policy_c_current = variables.policy_c[:, :, :, :, 2, age_i]
     @views policy_a_p_current = variables.policy_a_p[:, :, :, :, 2, age_i]
-    for ν_i in 1:ν_size, ϵ_i in 1:ϵ_size, n_i in 1:n_size
-        @inbounds w_bar = w_bar_grid[ϵ_i, ν_i, age_i]
-        V_current_a = @view V_current[:, n_i, ϵ_i, ν_i]
-        V_next_a = @view V_next[:, ϵ_i, ν_i]
-        policy_c_current_a = @views policy_c_current[:, n_i, ϵ_i, ν_i]
-        policy_a_p_current_a = @views policy_a_p_current[:, n_i, ϵ_i, ν_i]
-        @inbounds for a_i in 1:a_size
-            a = a_grid[a_p_i]
-
+    for ν_i in 1:ν_size, ϵ_i in 1:ϵ_size
+        for n_i in 1:n_size
+            V_current_n = @view V_current[:, n_i, :, :]
+            policy_c_current_n = @views policy_c_current[:, n_i, :, :]
+            policy_a_p_current_n = @views policy_a_p_current[:, n_i, :, :]
+            if n_i == 1
+                retired_step!(a_endo, V_next, policy_c_next, V_current_n, policy_c_current_n, policy_a_p_current_n, parameters, ν_i, ϵ_i, age_i)
+            end
         end
     end
 
