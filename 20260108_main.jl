@@ -124,26 +124,9 @@ function h_function(data_h::Array{Float64,1}, age_min::Integer, age_ret::Integer
     return model_h
 end
 
-function utility_function(c::Real, n::Real, q::Real, γ::Real, ψ::Real, κ::Real, q_bar::Real)
-    """
-    utility function with child quality
-        c - consumption
-        n - number of kids
-        q - child quality
-    """
-    if c > 0.0
-        if n == 0
-            return 1.0 / ((1.0 - γ) * c^(γ - 1.0))
-        else
-            if q >= q_bar
-                return 1.0 / ((1.0 - γ) * c^(γ - 1.0)) + ψ / ((1.0 - κ) * (n * q)^(κ - 1.0))
-            else
-                return -10^16
-            end
-        end
-    else
-        return -10^16
-    end
+function u_CRRA_e(c::Float64, e::Float64, one_m_γ::Float64, inv_one_m_γ::Float64, one_m_κ::Float64, ψ_inv_one_m_κ::Float64)
+    c <= 0.0 && return -1.0e16
+    return c^one_m_γ * inv_one_m_γ + e^one_m_κ * ψ_inv_one_m_κ
 end
 
 @inline function u_CRRA(c::Float64, one_m_γ::Float64, inv_one_m_γ::Float64)
@@ -184,11 +167,11 @@ function parameters_function(;
     #----------------------#
     # estimated parameters #
     #----------------------#
-    κ::Real=0.14,                   # preference curvature
-    ψ::Real=3.50,                   # preference scale
+    κ::Real=3.50,                   # preference curvature
+    ψ::Real=0.14,                   # preference scale
     μ::Real=0.35,                   # production share
     θ::Real=0.70,                   # elasticity of substitution in production
-    q_bar::Real=1.50,               # lower bound on children's consumption # 0.34
+    q_bar::Real=0.34,               # lower bound on children's consumption
     ψ_1::Real=0.91,                 # HH economies to money input to production
     ψ_2::Real=0.54,                 # HH economies to time input to production
     p::Real=0.02,                   # prob that a child becomes independent
@@ -231,6 +214,8 @@ function parameters_function(;
     EGM_fac = (β * R)^m_inv_γ
     one_m_κ = 1.0 - κ
     inv_κ = 1.0 / κ
+    inv_one_m_κ = 1.0 / (1.0 - κ)
+    ψ_inv_one_m_κ = ψ / (1.0 - κ)
     γ_by_κ = γ / κ
 
     # infertility parameters: taken from Trussell and Wilson (1985, Population Studies)
@@ -435,6 +420,8 @@ function parameters_function(;
         EGM_fac=EGM_fac,
         one_m_κ=one_m_κ,
         inv_κ=inv_κ,
+        inv_one_m_κ=inv_one_m_κ,
+        ψ_inv_one_m_κ=ψ_inv_one_m_κ,
         γ_by_κ=γ_by_κ,
         ρ=ρ,
         σ_ϵ=σ_ϵ,
@@ -631,44 +618,36 @@ function retired_step!(
 end
 
 @inline function solve_e_bisect(
-    m::Float64,                # resources available for (c + e), i.e. m = M - a'
-    n::Float64,
+    m::Float64,
+    n::Int64,
     P::Float64,
-    ζ::Float64,
+    ψ::Float64,
     γ::Float64,
     κ::Float64,
-    e_min::Float64;
-    c_floor::Float64 = 1e-12,
-    maxit::Int = 80,
-    tol::Float64 = 1e-12
+    one_m_κ::Float64,
+    e_bar::Float64;
+    c_floor::Float64=1e-12,
+    maxit::Int64=80,
+    tol::Float64=1e-12
 )::Float64
 
-    # Feasible upper bound for e so that c = m - e >= c_floor
     e_hi = m - c_floor
-    if e_hi < e_min
-        # Not feasible: cannot meet minimum quality while keeping c positive.
-        # You can decide how to handle this case. Common options:
-        # (i) return e_hi (forces c_floor), or
-        # (ii) error, or
-        # (iii) relax c_floor / treat as -Inf utility.
-        # Here we return e_hi (best feasible given c_floor).
+    if e_hi < e_bar
         return e_hi
     end
 
     # Define g(e) = marginal benefit of e - marginal cost in terms of forgone c
     # g(e) = ζ*(n/P)^(1-κ) * e^(-κ) - (m - e)^(-γ)
-    A = ζ * (n / P)^(1.0 - κ)
-
+    A = ψ * (n / P)^one_m_κ
     @inline function g(e::Float64)::Float64
-        # enforce c positive
         c = m - e
         return A * e^(-κ) - c^(-γ)
     end
 
-    # Check lower bound (constraint) corner: if g(e_min) <= 0, optimum at e = e_min
-    gl = g(e_min)
+    # Check lower bound (constraint) corner: if g(e_bar) <= 0, optimum at e = e_bar
+    gl = g(e_bar)
     if gl <= 0.0
-        return e_min
+        return e_bar
     end
 
     # Check upper bound corner: if g(e_hi) >= 0, utility still wants more e -> choose e_hi
@@ -678,7 +657,7 @@ end
     end
 
     # Now we have g(e_min) > 0 and g(e_hi) < 0 -> unique root inside (e_min, e_hi)
-    lo = e_min
+    lo = e_bar
     hi = e_hi
     mid = 0.5 * (lo + hi)
     @inbounds for _ in 1:maxit
@@ -700,10 +679,10 @@ function infertile_step!(
     a_endo::Vector{Float64},
     V_next::AbstractArray{Float64,3},
     policy_c_next::AbstractArray{Float64,3},
-    V_current::AbstractArray{Float64,3},
-    policy_c_current::AbstractArray{Float64,3},
-    policy_a_p_current::AbstractArray{Float64,3},
-    policy_e_current::AbstractArray{Float64,3},
+    V_current_n::AbstractArray{Float64,3},
+    policy_c_current_n::AbstractArray{Float64,3},
+    policy_a_p_current_n::AbstractArray{Float64,3},
+    policy_e_current_n::AbstractArray{Float64,3},
     parameters::NamedTuple,
     n_i::Integer,
     ν_i::Integer,
@@ -713,19 +692,25 @@ function infertile_step!(
     V_next_a = @view V_next[:, ϵ_i, ν_i]
     policy_c_next_a = @views policy_c_next[:, ϵ_i, ν_i]
 
-    V_current_a = @view V_current[:, ϵ_i, ν_i]
-    policy_c_current_a = @views policy_c_current[:, ϵ_i, ν_i]
-    policy_a_p_current_a = @views policy_a_p_current[:, ϵ_i, ν_i]
-    policy_e_current_a = @views policy_e_current[:, ϵ_i, ν_i]
+    V_current_n_a = @view V_current_n[:, ϵ_i, ν_i]
+    policy_c_current_n_a = @views policy_c_current_n[:, ϵ_i, ν_i]
+    policy_a_p_current_n_a = @views policy_a_p_current_n[:, ϵ_i, ν_i]
+    policy_e_current_n_a = @views policy_e_current_n[:, ϵ_i, ν_i]
 
-    @unpack w_grid, a_size, a_grid, a_min, aR_grid, inv_R, EGM_fac, inv_κ, one_m_κ, γ_by_κ, q_bar_P_grid, β, one_m_γ, inv_one_m_γ = parameters
+    @unpack w_grid, a_size, a_grid, a_min, aR_grid, inv_R, EGM_fac, inv_κ, γ_by_κ, P_grid, q_bar_P_grid = parameters 
+    @unpack β, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ = parameters
+    @unpack n_grid, ψ, γ, κ, one_m_κ = parameters
+
     @inbounds w_bar = w_grid[ϵ_i, ν_i, age_i]
-    @inbounds e_bar = q_bar_P_grid[n_i, ϵ_i, ν_i, h_i]
+    @inbounds P = P_grid[n_i, ϵ_i, ν_i, age_i]
+    @inbounds e_bar = q_bar_P_grid[n_i, ϵ_i, ν_i, age_i]
+    @inbounds n = n_grid[n_i]
 
     @inbounds for ap_i in 1:a_size
         ap = a_grid[ap_i]
         c = EGM_fac * policy_c_next_a[ap_i]
-        e_foc = (ζ * (n/P)^one_m_κ)^inv_κ * c^γ_by_κ
+        e_foc = (ψ * (n / P)^one_m_κ)^inv_κ * c^γ_by_κ 
+        println("$e_foc")
         e = max(e_foc, e_bar)
         m = c + ap + e
         a_endo[ap_i] = (m - w_bar) * inv_R
@@ -748,15 +733,18 @@ function infertile_step!(
             if m <= e_bar
                 e = e_bar
                 c = m - e
-                policy_c_current_a[a_i] = c
-                policy_a_p_current_a[a_i] = ap
-                policy_e_current_a[a_i] = e
-                V_current_a[a_i] = u_CRRA(c, one_m_γ, inv_one_m_γ)
+                policy_c_current_n_a[a_i] = c
+                policy_a_p_current_n_a[a_i] = ap
+                policy_e_current_n_a[a_i] = e
+                V_current_n_a[a_i] = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ)                
             else
-                
-                policy_a_p_current_a[a_i] = ap
-                policy_c_current_a[a_i] = c
-                V_current_a[a_i] = u_CRRA(c, one_m_γ, inv_one_m_γ) + β * V_next_a[1]
+                e = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar)
+                c = m - e
+                policy_a_p_current_n_a[a_i] = ap
+                policy_c_current_n_a[a_i] = c
+                policy_e_current_n_a[a_i] = e
+                Vp = lininterp(a_grid, V_next_a, ap)
+                V_current_n_a[a_i] = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ) + β * Vp
             end
         end
     end
@@ -765,12 +753,24 @@ function infertile_step!(
         a = a_grid[a_i]
         aR = aR_grid[a_i]
         ap = lininterp(a_endo, a_grid, a)
-        
-        c = aR + w_bar - ap - e
-        policy_a_p_current_a[a_i] = ap
-        policy_c_current_a[a_i] = c
-        Vp = lininterp(a_grid, V_next_a, ap)
-        V_current_a[a_i] = u_CRRA(c, one_m_γ, inv_one_m_γ) + β * Vp
+        M = aR + w_bar
+        m = M - ap
+        if m <= e_bar
+            e = e_bar
+            c = m - e
+            policy_c_current_n_a[a_i] = c
+            policy_a_p_current_n_a[a_i] = ap
+            policy_e_current_n_a[a_i] = e
+            V_current_n_a[a_i] = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ)
+        else
+            e = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar)
+            c = m - e
+            policy_a_p_current_n_a[a_i] = ap
+            policy_c_current_n_a[a_i] = c
+            policy_e_current_n_a[a_i] = e
+            Vp = lininterp(a_grid, V_next_a, ap)
+            V_current_n_a[a_i] = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ) + β * Vp
+        end
     end
 
     return nothing
@@ -836,8 +836,8 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
             policy_e_current_n = @views policy_e_current[:, n_i, :, :]
             if n_i == 1
                 retired_step!(a_endo, V_next, policy_c_next, V_current_n, policy_c_current_n, policy_a_p_current_n, parameters, ν_i, ϵ_i, age_i)
-            elseif n_i == n_max
             else
+                infertile_step!(a_endo, V_next, policy_c_next, V_current_n, policy_c_current_n, policy_a_p_current_n, policy_e_current_n, parameters, n_i, ν_i, ϵ_i, age_i)
             end
         end
     end
