@@ -351,6 +351,14 @@ function parameters_function(;
     ν_Γ = ν_Γ[1, :]
     ν_G = ν_Γ
 
+    ρβ = ρ * β
+    Γ = zeros(e3_size, e2_size, e2_size)
+    for e2_i in 1:e2_size, e2_p_i in 1:e2_size, e3_p_i in 1:e3_size
+        Γ[e3_p_i, e2_p_i, e2_i] = e3_Γ[e3_p_i] * e2_Γ[e2_i, e2_p_i]
+    end
+    Γ_ρβ = ρβ .* Γ
+    bellman_factor = 1.0 - ρβ
+
     w_grid = Array{Float64}(undef, ϵ_size, ν_size, h_size)
     for h_i = 1:h_size, ν_i in 1:ν_size, ϵ_i in 1:ϵ_size
         h = h_grid[h_i]
@@ -710,7 +718,6 @@ function infertile_step!(
         ap = a_grid[ap_i]
         c = EGM_fac * policy_c_next_a[ap_i]
         e_foc = (ψ * (n / P)^one_m_κ)^inv_κ * c^γ_by_κ 
-        println("$e_foc")
         e = max(e_foc, e_bar)
         m = c + ap + e
         a_endo[ap_i] = (m - w_bar) * inv_R
@@ -773,6 +780,30 @@ function infertile_step!(
         end
     end
 
+    return nothing
+end
+
+function fill_EV_Euc!(
+    EV_next::Array{Float64,4},
+    Euc_next::Array{Float64,4},
+    V_next::AbstractArray{Float64,4},
+    policy_c_next::AbstractArray{Float64,4},
+    parameters::NamedTuple
+)
+    @unpack γ = parameters
+    a_size, n_size, ϵ_size, ν_size = size(V_next)
+    @inbounds for a_i in 1:a_size, n_i in 1:n_size, ϵ_i in 1:ϵ_size, ν_i in 1:ν_size
+        ev  = 0.0
+        euc = 0.0
+        for ϵp in 1:ϵ_size, νp in 1:ν_size
+            p = Π[ϵ_i, ν_i, ϵp, νp]
+            ev  += p * V_next[a_i, n_i, ϵp, νp]
+            cp   = policy_c_next[a_i, n_i, ϵp, νp]
+            euc += p * cp^(-γ)
+        end
+        EV_next[a_i, n_i, ϵ_i, ν_i]  = ev
+        Euc_next[a_i, n_i, ϵ_i, ν_i] = euc
+    end
     return nothing
 end
 
@@ -842,15 +873,16 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
         end
     end
 
-    println("Solving the HH problem from the infertile age to one period before retirement (from age $age_inf to $(age_ret-1))")
+    println("Solving the HH problem from the infertile age to before retirement (from age $age_inf to $(age_ret-1))")
+    EV_next  = Array{Float64}(undef, a_size, n_size, ϵ_size)
+    Euc_next = Array{Float64}(undef, a_size, n_size, ϵ_size)
     for age_i = (age_ret-age_min):(-1):(age_inf-age_min+1)
-        @views V_next = variables.V[:, 1, :, :, 2, age_i+1]
-        @views policy_c_next = variables.policy_c[:, 1, :, :, 2, age_i+1]
-
-        @views V_current = variables.V[:, 1, :, :, 2, age_i]
-        @views policy_c_current = variables.policy_c[:, 1, :, :, 2, age_i]
-        @views policy_a_p_current = variables.policy_a_p[:, 1, :, :, 2, age_i]
-        @views policy_e_current = variables.policy_e[:, 1, :, :, 2, age_i]
+        @views V_next = variables.V[:, :, :, :, 2, age_i+1]
+        @views policy_c_next = variables.policy_c[:, :, :, :, 2, age_i+1]
+        @views V_current = variables.V[:, :, :, :, 2, age_i]
+        @views policy_c_current = variables.policy_c[:, :, :, :, 2, age_i]
+        @views policy_a_p_current = variables.policy_a_p[:, :, :, :, 2, age_i]
+        @views policy_e_current = variables.policy_e[:, :, :, :, 2, age_i]
     end
 
     # loop over all states
