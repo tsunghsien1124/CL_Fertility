@@ -147,12 +147,12 @@ function utility_function(c::Real, n::Real, q::Real, γ::Real, ψ::Real, κ::Rea
 end
 
 @inline function u_CRRA(c::Float64, one_m_γ::Float64, inv_one_m_γ::Float64)
-    c <= 0.0 && return -1e16
+    c <= 0.0 && return -1.0e16
     return c^one_m_γ * inv_one_m_γ
 end
 
 @inline function u_log(c::Float64)
-    c <= 0.0 && return -1e16
+    c <= 0.0 && return -1.0e16
     return log(c)
 end
 
@@ -224,10 +224,14 @@ function parameters_function(;
 
     # auxiliary parameters
     R = 1.0 + r
+    inv_R = 1.0 / R
     m_inv_γ = -1.0 / γ
     one_m_γ = 1.0 - γ
     inv_one_m_γ = 1.0 / (1.0 - γ)
     EGM_fac = (β * R)^m_inv_γ
+    one_m_κ = 1.0 - κ
+    inv_κ = 1.0 / κ
+    γ_by_κ = γ / κ
 
     # infertility parameters: taken from Trussell and Wilson (1985, Population Studies)
     data_inf = [0.07, 0.131, 0.231, 0.345, 0.576, 0.952]
@@ -371,24 +375,25 @@ function parameters_function(;
         w_grid[ϵ_i, ν_i, h_i] = h_i < ret_idx ? exp(h + ν + ϵ) : b * exp(h + ν + ϵ)
     end
 
-    P_grid = Array{Float64}(undef, ϵ_size, ν_size, n_size, h_size)
+    P_grid = Array{Float64}(undef, n_size, ϵ_size, ν_size, h_size)
     σ_θ = 1.0 / (1.0 - θ)
     inv1mσ = 1.0 / (1.0 - σ_θ)
     μσ = μ^σ_θ
     oneμσ = (1.0 - μ)^σ_θ
     pow1 = ψ_1 * (1.0 - σ_θ)
     pow2 = ψ_2 * (1.0 - σ_θ)
-    for h_i in 1:h_size, n_i in 1:n_size, ν_i in 1:ν_size, ϵ_i in 1:ϵ_size
+    for h_i in 1:h_size, ν_i in 1:ν_size, ϵ_i in 1:ϵ_size, n_i in 1:n_size
         n = n_grid[n_i]
         if n == 0.0
-            P_grid[ϵ_i, ν_i, n_i, h_i] = 1.0
+            P_grid[n_i, ϵ_i, ν_i, h_i] = 1.0
         else
             w = w_grid[ϵ_i, ν_i, h_i]
             term1 = μσ * n^pow1
             term2 = oneμσ * w^(1.0 - σ_θ) * n^pow2
-            P_grid[ϵ_i, ν_i, n_i, h_i] = (term1 + term2)^inv1mσ
+            P_grid[n_i, ϵ_i, ν_i, h_i] = (term1 + term2)^inv1mσ
         end
     end
+    q_bar_P_grid = q_bar .* P_grid
 
     # asset holding
     if edu_h_ind == 0.0
@@ -421,12 +426,16 @@ function parameters_function(;
     return (
         r=r,
         R=R,
+        inv_R=inv_R,
         β=β,
         γ=γ,
         m_inv_γ=m_inv_γ,
         one_m_γ=one_m_γ,
         inv_one_m_γ=inv_one_m_γ,
         EGM_fac=EGM_fac,
+        one_m_κ=one_m_κ,
+        inv_κ=inv_κ,
+        γ_by_κ=γ_by_κ,
         ρ=ρ,
         σ_ϵ=σ_ϵ,
         σ_ν=σ_ν,
@@ -469,6 +478,7 @@ function parameters_function(;
         ν_G=ν_G,
         w_grid=w_grid,
         P_grid=P_grid,
+        q_bar_P_grid=q_bar_P_grid,
         a_min=a_min,
         a_max=a_max,
         a_ind_zero=a_ind_zero,
@@ -560,11 +570,11 @@ end
 
 function retired_step!(
     a_endo::Vector{Float64},
-    V_next::AbstractArray{Float64},
-    policy_c_next::AbstractArray{Float64},
-    V_current::AbstractArray{Float64},
-    policy_c_current::AbstractArray{Float64},
-    policy_a_p_current::AbstractArray{Float64},
+    V_next::AbstractArray{Float64,3},
+    policy_c_next::AbstractArray{Float64,3},
+    V_current::AbstractArray{Float64,3},
+    policy_c_current::AbstractArray{Float64,3},
+    policy_a_p_current::AbstractArray{Float64,3},
     parameters::NamedTuple,
     ν_i::Integer,
     ϵ_i::Integer,
@@ -577,14 +587,14 @@ function retired_step!(
     policy_c_current_a = @views policy_c_current[:, ϵ_i, ν_i]
     policy_a_p_current_a = @views policy_a_p_current[:, ϵ_i, ν_i]
 
-    @unpack w_grid, a_size, a_grid, a_min, aR_grid, R, EGM_fac, β, one_m_γ, inv_one_m_γ = parameters
+    @unpack w_grid, a_size, a_grid, a_min, aR_grid, inv_R, EGM_fac, β, one_m_γ, inv_one_m_γ = parameters
     @inbounds w_bar = w_grid[ϵ_i, ν_i, age_i]
 
     @inbounds for ap_i in 1:a_size
         ap = a_grid[ap_i]
         c = EGM_fac * policy_c_next_a[ap_i]
         m = c + ap
-        a_endo[ap_i] = (m - w_bar) / R
+        a_endo[ap_i] = (m - w_bar) * inv_R
     end
 
     @inbounds for ap_i in 2:a_size
@@ -620,14 +630,82 @@ function retired_step!(
     return nothing
 end
 
+@inline function solve_e_bisect(
+    m::Float64,                # resources available for (c + e), i.e. m = M - a'
+    n::Float64,
+    P::Float64,
+    ζ::Float64,
+    γ::Float64,
+    κ::Float64,
+    e_min::Float64;
+    c_floor::Float64 = 1e-12,
+    maxit::Int = 80,
+    tol::Float64 = 1e-12
+)::Float64
+
+    # Feasible upper bound for e so that c = m - e >= c_floor
+    e_hi = m - c_floor
+    if e_hi < e_min
+        # Not feasible: cannot meet minimum quality while keeping c positive.
+        # You can decide how to handle this case. Common options:
+        # (i) return e_hi (forces c_floor), or
+        # (ii) error, or
+        # (iii) relax c_floor / treat as -Inf utility.
+        # Here we return e_hi (best feasible given c_floor).
+        return e_hi
+    end
+
+    # Define g(e) = marginal benefit of e - marginal cost in terms of forgone c
+    # g(e) = ζ*(n/P)^(1-κ) * e^(-κ) - (m - e)^(-γ)
+    A = ζ * (n / P)^(1.0 - κ)
+
+    @inline function g(e::Float64)::Float64
+        # enforce c positive
+        c = m - e
+        return A * e^(-κ) - c^(-γ)
+    end
+
+    # Check lower bound (constraint) corner: if g(e_min) <= 0, optimum at e = e_min
+    gl = g(e_min)
+    if gl <= 0.0
+        return e_min
+    end
+
+    # Check upper bound corner: if g(e_hi) >= 0, utility still wants more e -> choose e_hi
+    gh = g(e_hi)
+    if gh >= 0.0
+        return e_hi
+    end
+
+    # Now we have g(e_min) > 0 and g(e_hi) < 0 -> unique root inside (e_min, e_hi)
+    lo = e_min
+    hi = e_hi
+    mid = 0.5 * (lo + hi)
+    @inbounds for _ in 1:maxit
+        mid = 0.5 * (lo + hi)
+        gm = g(mid)
+        if abs(gm) <= tol || (hi - lo) <= tol * (1.0 + mid)
+            return mid
+        end
+        if gm > 0.0
+            lo = mid
+        else
+            hi = mid
+        end
+    end
+    return mid
+end
+
 function infertile_step!(
     a_endo::Vector{Float64},
-    V_next::AbstractArray{Float64},
-    policy_c_next::AbstractArray{Float64},
-    V_current::AbstractArray{Float64},
-    policy_c_current::AbstractArray{Float64},
-    policy_a_p_current::AbstractArray{Float64},
+    V_next::AbstractArray{Float64,3},
+    policy_c_next::AbstractArray{Float64,3},
+    V_current::AbstractArray{Float64,3},
+    policy_c_current::AbstractArray{Float64,3},
+    policy_a_p_current::AbstractArray{Float64,3},
+    policy_e_current::AbstractArray{Float64,3},
     parameters::NamedTuple,
+    n_i::Integer,
     ν_i::Integer,
     ϵ_i::Integer,
     age_i::Integer
@@ -638,18 +716,19 @@ function infertile_step!(
     V_current_a = @view V_current[:, ϵ_i, ν_i]
     policy_c_current_a = @views policy_c_current[:, ϵ_i, ν_i]
     policy_a_p_current_a = @views policy_a_p_current[:, ϵ_i, ν_i]
+    policy_e_current_a = @views policy_e_current[:, ϵ_i, ν_i]
 
-    @unpack w_grid, a_size, a_grid, a_min, aR_grid, R, EGM_fac, q_bar, P_grid, β, one_m_γ, inv_one_m_γ = parameters
+    @unpack w_grid, a_size, a_grid, a_min, aR_grid, inv_R, EGM_fac, inv_κ, one_m_κ, γ_by_κ, q_bar_P_grid, β, one_m_γ, inv_one_m_γ = parameters
     @inbounds w_bar = w_grid[ϵ_i, ν_i, age_i]
-    @inbounds e_bar = q_bar * P_grid[ϵ_i, ν_i, n_i, h_i]
+    @inbounds e_bar = q_bar_P_grid[n_i, ϵ_i, ν_i, h_i]
 
     @inbounds for ap_i in 1:a_size
         ap = a_grid[ap_i]
         c = EGM_fac * policy_c_next_a[ap_i]
-        e = (ζ * (n/P)^(1.0 - κ))^(1.0 / κ) * c^(γ / κ)
-        e_bar = 
-        m = c + ap
-        a_endo[ap_i] = (m - w_bar) / R
+        e_foc = (ζ * (n/P)^one_m_κ)^inv_κ * c^γ_by_κ
+        e = max(e_foc, e_bar)
+        m = c + ap + e
+        a_endo[ap_i] = (m - w_bar) * inv_R
     end
 
     @inbounds for ap_i in 2:a_size
@@ -663,11 +742,22 @@ function infertile_step!(
     if ibind > 0
         @inbounds for a_i in 1:ibind
             aR = aR_grid[a_i]
+            M = aR + w_bar
             ap = a_min
-            c = aR + w_bar - ap
-            policy_a_p_current_a[a_i] = ap
-            policy_c_current_a[a_i] = c
-            V_current_a[a_i] = u_CRRA(c, one_m_γ, inv_one_m_γ) + β * V_next_a[1]
+            m = M - ap
+            if m <= e_bar
+                e = e_bar
+                c = m - e
+                policy_c_current_a[a_i] = c
+                policy_a_p_current_a[a_i] = ap
+                policy_e_current_a[a_i] = e
+                V_current_a[a_i] = u_CRRA(c, one_m_γ, inv_one_m_γ)
+            else
+                
+                policy_a_p_current_a[a_i] = ap
+                policy_c_current_a[a_i] = c
+                V_current_a[a_i] = u_CRRA(c, one_m_γ, inv_one_m_γ) + β * V_next_a[1]
+            end
         end
     end
 
@@ -675,7 +765,8 @@ function infertile_step!(
         a = a_grid[a_i]
         aR = aR_grid[a_i]
         ap = lininterp(a_endo, a_grid, a)
-        c = aR + w_bar - ap
+        
+        c = aR + w_bar - ap - e
         policy_a_p_current_a[a_i] = ap
         policy_c_current_a[a_i] = c
         Vp = lininterp(a_grid, V_next_a, ap)
@@ -736,24 +827,30 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
     @views V_current = variables.V[:, :, :, :, 2, age_i]
     @views policy_c_current = variables.policy_c[:, :, :, :, 2, age_i]
     @views policy_a_p_current = variables.policy_a_p[:, :, :, :, 2, age_i]
+    @views policy_e_current = variables.policy_e[:, :, :, :, 2, age_i]
     for ν_i in 1:ν_size, ϵ_i in 1:ϵ_size
         for n_i in 1:n_size
             V_current_n = @view V_current[:, n_i, :, :]
             policy_c_current_n = @views policy_c_current[:, n_i, :, :]
             policy_a_p_current_n = @views policy_a_p_current[:, n_i, :, :]
+            policy_e_current_n = @views policy_e_current[:, n_i, :, :]
             if n_i == 1
                 retired_step!(a_endo, V_next, policy_c_next, V_current_n, policy_c_current_n, policy_a_p_current_n, parameters, ν_i, ϵ_i, age_i)
+            elseif n_i == n_max
+            else
             end
         end
     end
 
     println("Solving the HH problem from the infertile age to one period before retirement (from age $age_inf to $(age_ret-1))")
     for age_i = (age_ret-age_min):(-1):(age_inf-age_min+1)
-        @views V_current = variables.V[:, 1, :, :, 2, age_i]
         @views V_next = variables.V[:, 1, :, :, 2, age_i+1]
-        @views policy_c_current = variables.policy_c[:, 1, :, :, 2, age_i]
         @views policy_c_next = variables.policy_c[:, 1, :, :, 2, age_i+1]
+
+        @views V_current = variables.V[:, 1, :, :, 2, age_i]
+        @views policy_c_current = variables.policy_c[:, 1, :, :, 2, age_i]
         @views policy_a_p_current = variables.policy_a_p[:, 1, :, :, 2, age_i]
+        @views policy_e_current = variables.policy_e[:, 1, :, :, 2, age_i]
     end
 
     # loop over all states
