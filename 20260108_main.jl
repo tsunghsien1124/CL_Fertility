@@ -94,7 +94,7 @@ function infertility_risk_function(data_age::Array{Int64, 1}, data_inf::Array{Fl
 	fit = curve_fit(model, data_age, data_inf, ω_int)
 	model_age = collect(age_min:age_max)
 	model_inf = fit.param[1] .* exp.(fit.param[2] .* model_age)
-	model_inf[findall(model_age .== (age_inf+1))[]:end] .= 1.0
+	model_inf[findall(model_age .== age_inf)[]:end] .= 1.0
 	return model_age, model_inf
 end
 
@@ -352,14 +352,20 @@ function parameters_function(;
 	ν_Γ = ν_Γ[1, :]
 	ν_G = ν_Γ
 
-	Γ = zeros(n_size, ϵ_size, ν_size, n_size, ϵ_size)
-	for ϵ_i in 1:ϵ_size, n_i in 1:n_size, ν_p_i in 1:ν_size, ϵ_p_i in 1:ϵ_size, n_p_i in 1:n_size
-		Γ[n_p_i, ϵ_p_i, ν_p_i, n_i, ϵ_i] = n_Γ[n_i, n_p_i] * ν_Γ[ν_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i]
-	end
-
 	Γ_ret = zeros(ϵ_size, ν_size, ϵ_size)
 	for ϵ_i in 1:ϵ_size, ν_p_i in 1:ν_size, ϵ_p_i in 1:ϵ_size
 		Γ_ret[ϵ_p_i, ν_p_i, ϵ_i] = ν_Γ[ν_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i]
+	end
+
+	Γ_inf = zeros(n_size, ϵ_size, ν_size, n_size, ϵ_size)
+	for ϵ_i in 1:ϵ_size, n_i in 1:n_size, ν_p_i in 1:ν_size, ϵ_p_i in 1:ϵ_size, n_p_i in 1:n_size
+		Γ_inf[n_p_i, ϵ_p_i, ν_p_i, n_i, ϵ_i] = n_Γ[n_i, n_p_i] * ν_Γ[ν_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i]
+	end
+
+	Γ = zeros(n_size, ϵ_size, ν_size, inf_size, n_size, ϵ_size, age_inf-age_min)
+	for h_i in 1:(age_inf-age_min), ϵ_i in 1:ϵ_size, n_i in 1:n_size, ν_p_i in 1:ν_size, ϵ_p_i in 1:ϵ_size, n_p_i in 1:n_size
+		Γ[n_p_i, ϵ_p_i, ν_p_i, 1, n_i, ϵ_i, h_i] = (1.0 - inf_grid[h_i]) * n_Γ[n_i, n_p_i] * ν_Γ[ν_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i]
+		Γ[n_p_i, ϵ_p_i, ν_p_i, 2, n_i, ϵ_i, h_i] = inf_grid[h_i] * n_Γ[n_i, n_p_i] * ν_Γ[ν_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i]
 	end
 
 	w_grid = Array{Float64}(undef, ϵ_size, ν_size, h_size)
@@ -479,8 +485,9 @@ function parameters_function(;
 		ν_grid = ν_grid,
 		ν_Γ = ν_Γ,
 		ν_G = ν_G,
-		Γ = Γ,
 		Γ_ret = Γ_ret,
+		Γ_inf = Γ_inf,
+		Γ = Γ,
 		w_grid = w_grid,
 		P_grid = P_grid,
 		q_bar_P_grid = q_bar_P_grid,
@@ -909,15 +916,168 @@ function infertile_step!(
 	return nothing
 end
 
+function fertile_step!(
+	V_endo::Vector{Float64},
+	a_endo::Vector{Float64},
+	ap_endo::Vector{Float64},
+	V_next_a::AbstractVector{Float64},
+	c_next_a::AbstractVector{Float64},
+	V_next_aK::AbstractVector{Float64},
+	c_next_aK::AbstractVector{Float64},
+	V_current_a::AbstractVector{Float64},
+	c_current_a::AbstractVector{Float64},
+	a_p_current_a::AbstractVector{Float64},
+	e_current_a::AbstractVector{Float64},
+	parameters::NamedTuple,
+	w_bar::Float64,
+    P::Float64,
+    e_bar::Float64,
+    n::Int64
+)
+
+	@unpack w_grid, a_size, a_grid, a_min, aR_grid, inv_R, EGM_fac, inv_κ, γ_by_κ, P_grid, q_bar_P_grid = parameters
+	@unpack β, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ = parameters
+	@unpack n_grid, ψ, γ, κ = parameters
+	@unpack c_floor, V_penalty = parameters
+
+	e_para = (ψ * (n / P)^one_m_κ)^inv_κ
+	if !isfinite(e_para)
+		@inbounds for a_i in 1:a_size
+			V_current_a[a_i]   = V_penalty
+			c_current_a[a_i]   = c_floor
+			a_p_current_a[a_i] = a_min
+			e_current_a[a_i]   = e_bar
+		end
+		return nothing
+	end
+
+	nv = 0
+	@inbounds for ap_i in 1:a_size
+		Vp = V_next_a[ap_i]
+		if !isfinite(Vp) || Vp <= V_penalty
+			continue
+		end
+		cnext = c_next_a[ap_i]
+		if !isfinite(cnext) || cnext <= c_floor
+			continue
+		end
+		c = EGM_fac * cnext
+		if !isfinite(c) || c <= c_floor
+			continue
+		end
+		e_foc = e_para * c^γ_by_κ
+		e     = max(e_foc, e_bar)
+		if !isfinite(e)
+			continue
+		end
+		ap      = a_grid[ap_i]
+		m       = c + ap + e
+		a_today = (m - w_bar) * inv_R
+		if !isfinite(a_today)
+			continue
+		end
+		nv          += 1
+		V_endo[nv]  = Vp
+		ap_endo[nv] = ap
+		a_endo[nv]  = a_today
+	end
+
+	if nv == 0
+		@inbounds for a_i in 1:a_size
+			V_current_a[a_i]   = V_penalty
+			c_current_a[a_i]   = c_floor
+			a_p_current_a[a_i] = a_min
+			e_current_a[a_i]   = e_bar
+		end
+		return nothing
+	end
+
+	V_endo_v  = @view V_endo[1:nv]
+	a_endo_v  = @view a_endo[1:nv]
+	ap_endo_v = @view ap_endo[1:nv]
+
+	@inbounds for j in 2:nv
+		if a_endo_v[j] <= a_endo_v[j-1]
+			a_endo_v[j] = nextfloat(a_endo_v[j-1])
+		end
+	end
+
+	ibind = searchsortedlast(a_grid, a_endo_v[1])
+
+	if ibind > 0
+		has_amin = (ap_endo_v[1] == a_min)
+
+		@inbounds for a_i in 1:ibind
+			aR = aR_grid[a_i]
+			M  = aR + w_bar
+			ap = a_min
+			m  = M - ap
+
+			if !has_amin || m <= e_bar + c_floor
+			    V_current_a[a_i]   = V_penalty
+			    c_current_a[a_i]   = c_floor
+			    a_p_current_a[a_i] = ap
+			    e_current_a[a_i]   = e_bar
+			else
+            	Vp = V_endo_v[1]
+				if !isfinite(Vp) || Vp <= V_penalty
+			        V_current_a[a_i]   = V_penalty
+			        c_current_a[a_i]   = c_floor
+			        a_p_current_a[a_i] = ap
+			        e_current_a[a_i]   = e_bar
+					continue
+				end
+				e = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar)
+				c = m - e
+				V_current_a[a_i]   = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ; c_floor = c_floor, V_penalty = V_penalty) + β * Vp
+				c_current_a[a_i]   = c
+				a_p_current_a[a_i] = ap
+				e_current_a[a_i]   = e
+			end
+		end
+	end
+
+	@inbounds for a_i in (ibind+1):a_size
+		a = a_grid[a_i]
+		aR = aR_grid[a_i]
+		ap = lininterp(a_endo_v, ap_endo_v, a)
+		M = aR + w_bar
+		m = M - ap
+		if m <= e_bar + c_floor
+			V_current_a[a_i]   = V_penalty
+			c_current_a[a_i]   = c_floor
+			a_p_current_a[a_i] = ap
+			e_current_a[a_i]   = e_bar
+		else
+			Vp = lininterp(ap_endo_v, V_endo_v, ap)
+			if !isfinite(Vp) || Vp <= V_penalty
+			    V_current_a[a_i]   = V_penalty
+			    c_current_a[a_i]   = c_floor
+			    a_p_current_a[a_i] = ap
+			    e_current_a[a_i]   = e_bar
+				continue
+			end
+            e = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar)
+			c = m - e
+        	V_current_a[a_i] = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ; c_floor = c_floor, V_penalty = V_penalty) + β * Vp
+			c_current_a[a_i] = c
+            a_p_current_a[a_i] = ap
+			e_current_a[a_i] = e
+		end
+	end
+	return nothing
+end
+
 function fill_EV_Euc!(
 	EV_next::AbstractArray{Float64, 3},
 	c_next_CE::AbstractArray{Float64, 3},
 	V_next::AbstractArray{Float64, N},
 	policy_c_next::AbstractArray{Float64, N},
 	parameters::NamedTuple,
+	age_i::Int64
 ) where {N}
 
-	@unpack a_size, n_size, ϵ_size, Γ, Γ_ret, γ, m_inv_γ = parameters
+	@unpack a_size, n_size, ϵ_size, Γ_ret, Γ_inf, Γ, γ, m_inv_γ = parameters
 	@unpack c_floor, V_penalty = parameters
 
 	@inbounds for a_p_i in 1:a_size, n_i in 1:n_size, ϵ_i in 1:ϵ_size
@@ -925,10 +1085,14 @@ function fill_EV_Euc!(
 			@views Γt = Γ_ret[:, :, ϵ_i]
 			@views Vt = V_next[a_p_i, :, :]
 			@views ct = policy_c_next[a_p_i, :, :]
-		else
-			@views Γt = Γ[:, :, :, n_i, ϵ_i]
+		elseif N == 4
+			@views Γt = Γ_inf[:, :, :, n_i, ϵ_i]
 			@views Vt = V_next[a_p_i, :, :, :]
 			@views ct = policy_c_next[a_p_i, :, :, :]
+		else
+			@views Γt = Γ[:, :, :, :, n_i, ϵ_i, age_i]
+			@views Vt = V_next[a_p_i, :, :, :, :]
+			@views ct = policy_c_next[a_p_i, :, :, :, :]
 		end
 
 		EV  = 0.0
@@ -1014,7 +1178,7 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
 	c_next_CE = Array{Float64}(undef, a_size, n_size, ϵ_size)
 	V_next = @view variables.V[:, 1, :, :, 2, age_i+1]
 	c_next = @view variables.policy_c[:, 1, :, :, 2, age_i+1]
-	fill_EV_Euc!(EV_next, c_next_CE, V_next, c_next, parameters)
+	fill_EV_Euc!(EV_next, c_next_CE, V_next, c_next, parameters, age_i)
 	V_current = @view variables.V[:, :, :, :, 2, age_i]
 	c_current = @view variables.policy_c[:, :, :, :, 2, age_i]
 	a_p_current = @view variables.policy_a_p[:, :, :, :, 2, age_i]
@@ -1043,7 +1207,7 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
 	for age_i in (age_ret-age_min-1):(-1):(age_inf-age_min+1)
 		V_next = @view variables.V[:, :, :, :, 2, age_i+1]
 		c_next = @view variables.policy_c[:, :, :, :, 2, age_i+1]
-		fill_EV_Euc!(EV_next, c_next_CE, V_next, c_next, parameters)
+		fill_EV_Euc!(EV_next, c_next_CE, V_next, c_next, parameters, age_i)
 		V_current = @view variables.V[:, :, :, :, 2, age_i]
 		c_current = @view variables.policy_c[:, :, :, :, 2, age_i]
 		a_p_current = @view variables.policy_a_p[:, :, :, :, 2, age_i]
@@ -1071,27 +1235,34 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
 
 	println("Solving the HH problem just before the infertile age (at age $(age_inf-1))")
 	age_i = age_inf - age_min
-	EV_next = Array{Float64}(undef, a_size, n_size, ϵ_size)
-	c_next_CE = Array{Float64}(undef, a_size, n_size, ϵ_size)
-	@views V_next = variables.V[:, :, :, :, 2, age_i+1]
-	@views policy_c_next = variables.policy_c[:, :, :, :, 2, age_i+1]
-	fill_EV_Euc!(EV_next, c_next_CE, V_next, policy_c_next, parameters)
-	@views V_current = variables.V[:, :, :, :, :, age_i]
-	@views policy_c_current = variables.policy_c[:, :, :, :, :, age_i]
-	@views policy_a_p_current = variables.policy_a_p[:, :, :, :, :, age_i]
-	@views policy_e_current = variables.policy_e[:, :, :, :, :, age_i]
+	V_next = @view variables.V[:, :, :, :, 2, age_i+1]
+	c_next = @view variables.policy_c[:, :, :, :, 2, age_i+1]
+	fill_EV_Euc!(EV_next, c_next_CE, V_next, policy_c_next, parameters, age_i)
+	V_current = @view variables.V[:, :, :, :, :, age_i]
+	c_current = @view variables.policy_c[:, :, :, :, :, age_i]
+	a_p_current = @view variables.policy_a_p[:, :, :, :, :, age_i]
+	e_current = @view variables.policy_e[:, :, :, :, :, age_i]
 	for ϵ_i in 1:ϵ_size, ν_i in 1:ν_size
+        @inbounds w_bar = w_grid[ϵ_i, ν_i, age_i]
 		for n_i in 1:n_size
-			EV_next_n = @view EV_next[:, n_i, :]
-			c_next_CE_n = @view c_next_CE[:, n_i, :]
-			V_current_n = @view V_current[:, n_i, :, :]
-			policy_c_current_n = @views policy_c_current[:, n_i, :, :]
-			policy_a_p_current_n = @views policy_a_p_current[:, n_i, :, :]
-			policy_e_current_n = @views policy_e_current[:, n_i, :, :]
+			@inbounds P = P_grid[n_i, ϵ_i, ν_i, age_i]
+	        @inbounds e_bar = q_bar_P_grid[n_i, ϵ_i, ν_i, age_i]
+	        @inbounds n = n_grid[n_i]
+			EV_next_a = @view EV_next[:, n_i, ϵ_i]
+			c_next_CE_a = @view c_next_CE[:, n_i, ϵ_i]
+			EV_next_aK = @view EV_next[:, n_i+1, ϵ_i]
+			c_next_CE_aK = @view c_next_CE[:, n_i+1, ϵ_i]
+			V_current_a = @view V_current[:, n_i, ϵ_i, ν_i]
+			c_current_a = @view c_current[:, n_i, ϵ_i, ν_i]
+			a_p_current_a = @view a_p_current[:, n_i, ϵ_i, ν_i]
+			e_current_a = @view e_current[:, n_i, ϵ_i, ν_i]
 			if n_i == 1
-				retired_step!(V_endo, a_endo, ap_endo, EV_next_n, c_next_CE_n, V_current_n, policy_c_current_n, policy_a_p_current_n, parameters, ϵ_i, ν_i, age_i)
+				retired_step!(V_endo, a_endo, ap_endo, EV_next_a, c_next_CE_a, V_current_a, c_current_a, a_p_current_a, parameters, w_bar)
+			elseif n_i == n_max
+    			infertile_step!(V_endo, a_endo, ap_endo, EV_next_a, c_next_CE_a, V_current_a, c_current_a, a_p_current_a, e_current_a, parameters, w_bar, P, e_bar, n)
 			else
-				infertile_step!(V_endo, a_endo, ap_endo, EV_next_n, c_next_CE_n, V_current_n, policy_c_current_n, policy_a_p_current_n, policy_e_current_n, parameters, n_i, ϵ_i, ν_i, age_i)
+    			infertile_step!(V_endo, a_endo, ap_endo, EV_next_a, c_next_CE_a, V_current_a, c_current_a, a_p_current_a, e_current_a, parameters, w_bar, P, e_bar, n)
+    			fertile_step!(V_endo, a_endo, ap_endo, EV_next_a, EV_next_aK, c_next_CE_a, c_next_CE_aK, V_current_a, c_current_a, a_p_current_a, e_current_a, parameters, w_bar, P, e_bar, n)
 			end
 		end
 	end
