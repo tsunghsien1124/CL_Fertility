@@ -124,9 +124,9 @@ function h_function(data_h::Array{Float64, 1}, age_min::Integer, age_ret::Intege
 	return model_h
 end
 
-@inline function u_CRRA_e(c::Float64, e::Float64, one_m_γ::Float64, inv_one_m_γ::Float64, one_m_κ::Float64, ψ_inv_one_m_κ::Float64; c_floor::Float64 = 1e-12, V_penalty::Float64 = -1.0e16)
+@inline function u_CRRA_e(c::Float64, e::Float64, one_m_γ::Float64, inv_one_m_γ::Float64, one_m_κ::Float64, ψ_inv_one_m_κ::Float64, scale::Float64; c_floor::Float64 = 1e-12, V_penalty::Float64 = -1.0e16)
 	c <= c_floor && return V_penalty
-	return c^one_m_γ * inv_one_m_γ + e^one_m_κ * ψ_inv_one_m_κ
+	return c^one_m_γ * inv_one_m_γ + scale * e^one_m_κ * ψ_inv_one_m_κ
 end
 
 @inline function u_CRRA(c::Float64, one_m_γ::Float64, inv_one_m_γ::Float64; c_floor::Float64 = 1e-12, V_penalty::Float64 = -1.0e16)
@@ -167,11 +167,11 @@ function parameters_function(;
 	#----------------------#
 	# estimated parameters #
 	#----------------------#
-	κ::Real = 3.50,                   # preference curvature
-	ψ::Real = 0.14,                   # preference scale
+	κ::Real = 0.14,                   # preference curvature
+	ψ::Real = 3.50,                   # preference scale
 	μ::Real = 0.35,                   # production share
 	θ::Real = 0.70,                   # elasticity of substitution in production
-	q_bar::Real = 0.34,               # lower bound on children's consumption
+	q_bar::Real = 1.40,               # lower bound on children's consumption
 	ψ_1::Real = 0.91,                 # HH economies to money input to production
 	ψ_2::Real = 0.54,                 # HH economies to time input to production
 	p::Real = 0.02, #====================##====================#                   # prob that a child becomes independent
@@ -362,10 +362,11 @@ function parameters_function(;
 		Γ_inf[n_p_i, ϵ_p_i, ν_p_i, n_i, ϵ_i] = n_Γ[n_i, n_p_i] * ν_Γ[ν_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i]
 	end
 
-	Γ = zeros(n_size, ϵ_size, ν_size, inf_size, n_size, ϵ_size, age_inf-age_min)
+	Γ = zeros(n_size, ϵ_size, ν_size, inf_size, n_size, ϵ_size, inf_size, age_inf-age_min)
 	for h_i in 1:(age_inf-age_min), ϵ_i in 1:ϵ_size, n_i in 1:n_size, ν_p_i in 1:ν_size, ϵ_p_i in 1:ϵ_size, n_p_i in 1:n_size
-		Γ[n_p_i, ϵ_p_i, ν_p_i, 1, n_i, ϵ_i, h_i] = (1.0 - inf_grid[h_i]) * n_Γ[n_i, n_p_i] * ν_Γ[ν_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i]
-		Γ[n_p_i, ϵ_p_i, ν_p_i, 2, n_i, ϵ_i, h_i] = inf_grid[h_i] * n_Γ[n_i, n_p_i] * ν_Γ[ν_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i]
+		Γ[n_p_i, ϵ_p_i, ν_p_i, 1, n_i, ϵ_i, 1, h_i] = (1.0 - inf_grid[h_i]) * n_Γ[n_i, n_p_i] * ν_Γ[ν_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i]
+		Γ[n_p_i, ϵ_p_i, ν_p_i, 2, n_i, ϵ_i, 1, h_i] = inf_grid[h_i] * n_Γ[n_i, n_p_i] * ν_Γ[ν_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i]
+		Γ[n_p_i, ϵ_p_i, ν_p_i, 2, n_i, ϵ_i, 2, h_i] = n_Γ[n_i, n_p_i] * ν_Γ[ν_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i]
 	end
 
 	w_grid = Array{Float64}(undef, ϵ_size, ν_size, h_size)
@@ -522,8 +523,8 @@ mutable struct EGMWorkspace
 	c1::Vector{Float64}
 	ap1::Vector{Float64}
 	e1::Vector{Float64}
-	EV_next::Array{Float64, 3}
-	c_next_CE::Array{Float64, 3}
+	EV_next::Array{Float64, 4}
+	c_next_CE::Array{Float64, 4}
 end
 
 mutable struct Mutable_Variables
@@ -560,8 +561,8 @@ function variables_function(parameters::NamedTuple)
 	c1 = Vector{Float64}(undef, a_size)
 	ap1 = Vector{Float64}(undef, a_size)
 	e1 = Vector{Float64}(undef, a_size)
-	EV_next = Array{Float64}(undef, a_size, n_size, ϵ_size)
-	c_next_CE = Array{Float64}(undef, a_size, n_size, ϵ_size)
+	EV_next = Array{Float64}(undef, a_size, n_size, ϵ_size, inf_size)
+	c_next_CE = Array{Float64}(undef, a_size, n_size, ϵ_size, inf_size)
 	EGM_ws = EGMWorkspace(V_endo, a_endo, ap_endo, V1, c1, ap1, e1, EV_next, c_next_CE)
 
 	# return outputs
@@ -810,8 +811,10 @@ function infertile_step!(
 	@unpack β, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ = parameters
 	@unpack n_grid, ψ, γ, κ = parameters
 	@unpack c_floor, V_penalty = parameters
+	
+	scale = (n / P)^one_m_κ 
+	e_para = (ψ * scale)^inv_κ
 
-	e_para = (ψ * (n / P)^one_m_κ)^inv_κ
 	if !isfinite(e_para)
 		@inbounds for a_i in 1:a_size
 			V_current_a[a_i]   = V_penalty
@@ -907,7 +910,7 @@ function infertile_step!(
 					continue
 				end
 				c                  = m - e
-				V_current_a[a_i]   = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ; c_floor = c_floor, V_penalty = V_penalty) + β * Vp
+				V_current_a[a_i]   = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, scale; c_floor = c_floor, V_penalty = V_penalty) + β * Vp
 				c_current_a[a_i]   = c
 				a_p_current_a[a_i] = ap
 				e_current_a[a_i]   = e
@@ -944,7 +947,7 @@ function infertile_step!(
 				continue
 			end
 			c = m - e
-			V_current_a[a_i] = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ; c_floor = c_floor, V_penalty = V_penalty) + β * Vp
+			V_current_a[a_i] = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, scale; c_floor = c_floor, V_penalty = V_penalty) + β * Vp
 			c_current_a[a_i] = c
 			a_p_current_a[a_i] = ap
 			e_current_a[a_i] = e
@@ -1018,57 +1021,106 @@ function fertile_step!(
 end
 
 function fill_EV_Euc!(
-	EV_next::AbstractArray{Float64, 3},
-	c_next_CE::AbstractArray{Float64, 3},
+	EV_next::AbstractArray{Float64, 4},
+	c_next_CE::AbstractArray{Float64, 4},
 	V_next::AbstractArray{Float64, N},
 	policy_c_next::AbstractArray{Float64, N},
 	parameters::NamedTuple,
 	age_i::Int64,
 ) where {N}
 
-	@unpack a_size, n_size, ϵ_size, Γ_ret, Γ_inf, Γ, γ, m_inv_γ = parameters
+	@unpack a_size, n_size, ϵ_size, inf_size, Γ_ret, Γ_inf, Γ, γ, m_inv_γ = parameters
 	@unpack c_floor, V_penalty = parameters
 
-	@inbounds for a_p_i in 1:a_size, n_i in 1:n_size, ϵ_i in 1:ϵ_size
-		if N == 3
+	if N == 3
+		@inbounds for a_p_i in 1:a_size, n_i in 1:n_size, ϵ_i in 1:ϵ_size
 			@views Γt = Γ_ret[:, :, ϵ_i]
 			@views Vt = V_next[a_p_i, :, :]
 			@views ct = policy_c_next[a_p_i, :, :]
-		elseif N == 4
+			EV  = 0.0
+			Euc = 0.0
+			bad = false
+			for k in eachindex(Γt)
+				p = Γt[k]
+				if p == 0.0
+					continue
+				end
+				Vp = Vt[k]
+				c  = ct[k]
+				if !isfinite(Vp) || Vp <= V_penalty || !isfinite(c) || c <= c_floor
+					bad = true
+					break
+				end
+				EV  += p * Vp
+				Euc += p * (c^(-γ))
+			end
+			if bad
+				EV_next[a_p_i, n_i, ϵ_i, 2] = V_penalty
+				c_next_CE[a_p_i, n_i, ϵ_i, 2] = NaN
+			else
+				EV_next[a_p_i, n_i, ϵ_i, 2] = EV
+				c_next_CE[a_p_i, n_i, ϵ_i, 2] = Euc^m_inv_γ
+			end
+		end
+	elseif N == 4
+		@inbounds for a_p_i in 1:a_size, n_i in 1:n_size, ϵ_i in 1:ϵ_size
 			@views Γt = Γ_inf[:, :, :, n_i, ϵ_i]
 			@views Vt = V_next[a_p_i, :, :, :]
 			@views ct = policy_c_next[a_p_i, :, :, :]
-		else
-			@views Γt = Γ[:, :, :, :, n_i, ϵ_i, age_i]
+			EV  = 0.0
+			Euc = 0.0
+			bad = false
+			for k in eachindex(Γt)
+				p = Γt[k]
+				if p == 0.0
+					continue
+				end
+				Vp = Vt[k]
+				c  = ct[k]
+				if !isfinite(Vp) || Vp <= V_penalty || !isfinite(c) || c <= c_floor
+					bad = true
+					break
+				end
+				EV  += p * Vp
+				Euc += p * (c^(-γ))
+			end
+			if bad
+				EV_next[a_p_i, n_i, ϵ_i, 2] = V_penalty
+				c_next_CE[a_p_i, n_i, ϵ_i, 2] = NaN
+			else
+				EV_next[a_p_i, n_i, ϵ_i, 2] = EV
+				c_next_CE[a_p_i, n_i, ϵ_i, 2] = Euc^m_inv_γ
+			end
+		end
+	else
+		@inbounds for a_p_i in 1:a_size, n_i in 1:n_size, ϵ_i in 1:ϵ_size, inf_i in 1:inf_size
+			@views Γt = Γ[:, :, :, :, n_i, ϵ_i, inf_i, age_i]
 			@views Vt = V_next[a_p_i, :, :, :, :]
 			@views ct = policy_c_next[a_p_i, :, :, :, :]
-		end
-
-		EV  = 0.0
-		Euc = 0.0
-		bad = false
-
-		for k in eachindex(Γt)
-			p = Γt[k]
-			if p == 0.0
-				continue
+			EV  = 0.0
+			Euc = 0.0
+			bad = false
+			for k in eachindex(Γt)
+				p = Γt[k]
+				if p == 0.0
+					continue
+				end
+				Vp = Vt[k]
+				c  = ct[k]
+				if !isfinite(Vp) || Vp <= V_penalty || !isfinite(c) || c <= c_floor
+					bad = true
+					break
+				end
+				EV  += p * Vp
+				Euc += p * (c^(-γ))
 			end
-			Vp = Vt[k]
-			c  = ct[k]
-			if !isfinite(Vp) || Vp <= V_penalty || !isfinite(c) || c <= c_floor
-				bad = true
-				break
+			if bad
+				EV_next[a_p_i, n_i, ϵ_i, inf_i] = V_penalty
+				c_next_CE[a_p_i, n_i, ϵ_i, inf_i] = NaN
+			else
+				EV_next[a_p_i, n_i, ϵ_i, inf_i] = EV
+				c_next_CE[a_p_i, n_i, ϵ_i, inf_i] = Euc^m_inv_γ
 			end
-			EV  += p * Vp
-			Euc += p * (c^(-γ))
-		end
-
-		if bad
-			EV_next[a_p_i, n_i, ϵ_i] = V_penalty
-			c_next_CE[a_p_i, n_i, ϵ_i] = NaN
-		else
-			EV_next[a_p_i, n_i, ϵ_i] = EV
-			c_next_CE[a_p_i, n_i, ϵ_i] = Euc^m_inv_γ
 		end
 	end
 	return nothing
@@ -1144,8 +1196,8 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
 			@inbounds P = P_grid[n_i, ϵ_i, ν_i, age_i]
 			@inbounds e_bar = q_bar_P_grid[n_i, ϵ_i, ν_i, age_i]
 			@inbounds n = n_grid[n_i]
-			EV_next_a = @view EV_next[:, n_i, ϵ_i]
-			c_next_CE_a = @view c_next_CE[:, n_i, ϵ_i]
+			EV_next_a = @view EV_next[:, n_i, ϵ_i, 2]
+			c_next_CE_a = @view c_next_CE[:, n_i, ϵ_i, 2]
 			V_current_a = @view V_current[:, n_i, ϵ_i, ν_i]
 			c_current_a = @view c_current[:, n_i, ϵ_i, ν_i]
 			a_p_current_a = @view a_p_current[:, n_i, ϵ_i, ν_i]
@@ -1173,8 +1225,8 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
 				@inbounds P = P_grid[n_i, ϵ_i, ν_i, age_i]
 				@inbounds e_bar = q_bar_P_grid[n_i, ϵ_i, ν_i, age_i]
 				@inbounds n = n_grid[n_i]
-				EV_next_a = @view EV_next[:, n_i, ϵ_i]
-				c_next_CE_a = @view c_next_CE[:, n_i, ϵ_i]
+				EV_next_a = @view EV_next[:, n_i, ϵ_i, 2]
+				c_next_CE_a = @view c_next_CE[:, n_i, ϵ_i, 2]
 				V_current_a = @view V_current[:, n_i, ϵ_i, ν_i]
 				c_current_a = @view c_current[:, n_i, ϵ_i, ν_i]
 				a_p_current_a = @view a_p_current[:, n_i, ϵ_i, ν_i]
@@ -1204,20 +1256,20 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
 			@inbounds P = P_grid[n_i, ϵ_i, ν_i, age_i]
 			@inbounds e_bar = q_bar_P_grid[n_i, ϵ_i, ν_i, age_i]
 			@inbounds n = n_grid[n_i]
-			EV_next_a = @view EV_next[:, n_i, ϵ_i]
-			c_next_CE_a = @view c_next_CE[:, n_i, ϵ_i]
 			for inf_i in 1:inf_size
+				EV_next_a = @view EV_next[:, n_i, ϵ_i, 2]
+				c_next_CE_a = @view c_next_CE[:, n_i, ϵ_i, 2]
 				V_current_a = @view V_current[:, n_i, ϵ_i, ν_i, inf_i]
 				c_current_a = @view c_current[:, n_i, ϵ_i, ν_i, inf_i]
 				a_p_current_a = @view a_p_current[:, n_i, ϵ_i, ν_i, inf_i]
 				e_current_a = @view e_current[:, n_i, ϵ_i, ν_i, inf_i]
 				K_current_a = @view K_current[:, n_i, ϵ_i, ν_i, inf_i]
 				if inf_i == 1
-					if n_i == n_size
+					if n == n_max
 						infertile_step!(V_endo, a_endo, ap_endo, EV_next_a, c_next_CE_a, V_current_a, c_current_a, a_p_current_a, e_current_a, parameters, w_bar, P, e_bar, n)
 					else
-						EV_next_aK = @view EV_next[:, n_i+1, ϵ_i]
-						c_next_CE_aK = @view c_next_CE[:, n_i+1, ϵ_i]
+						EV_next_aK = @view EV_next[:, n_i+1, ϵ_i, 2]
+						c_next_CE_aK = @view c_next_CE[:, n_i+1, ϵ_i, 2]
 						fertile_step!(V_endo, a_endo, ap_endo,
 							EV_next_a, c_next_CE_a, EV_next_aK, c_next_CE_aK,
 							V_current_a, c_current_a, a_p_current_a, e_current_a, K_current_a,
@@ -1225,7 +1277,7 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
 							parameters, w_bar, P, e_bar, n)
 					end
 				else
-					if n_i == 1
+					if n == 0.0
 						retired_step!(V_endo, a_endo, ap_endo, EV_next_a, c_next_CE_a, V_current_a, c_current_a, a_p_current_a, parameters, w_bar)
 					else
 						infertile_step!(V_endo, a_endo, ap_endo, EV_next_a, c_next_CE_a, V_current_a, c_current_a, a_p_current_a, e_current_a, parameters, w_bar, P, e_bar, n)
@@ -1251,20 +1303,20 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
 				@inbounds P = P_grid[n_i, ϵ_i, ν_i, age_i]
 				@inbounds e_bar = q_bar_P_grid[n_i, ϵ_i, ν_i, age_i]
 				@inbounds n = n_grid[n_i]
-				EV_next_a = @view EV_next[:, n_i, ϵ_i]
-				c_next_CE_a = @view c_next_CE[:, n_i, ϵ_i]
 				for inf_i in 1:inf_size
+					EV_next_a = @view EV_next[:, n_i, ϵ_i, inf_i]
+					c_next_CE_a = @view c_next_CE[:, n_i, ϵ_i, inf_i]
 					V_current_a = @view V_current[:, n_i, ϵ_i, ν_i, inf_i]
 					c_current_a = @view c_current[:, n_i, ϵ_i, ν_i, inf_i]
 					a_p_current_a = @view a_p_current[:, n_i, ϵ_i, ν_i, inf_i]
 					e_current_a = @view e_current[:, n_i, ϵ_i, ν_i, inf_i]
 					K_current_a = @view K_current[:, n_i, ϵ_i, ν_i, inf_i]
 					if inf_i == 1
-						if n_i == n_size
+						if n == n_max
 							infertile_step!(V_endo, a_endo, ap_endo, EV_next_a, c_next_CE_a, V_current_a, c_current_a, a_p_current_a, e_current_a, parameters, w_bar, P, e_bar, n)
 						else
-							EV_next_aK = @view EV_next[:, n_i+1, ϵ_i]
-							c_next_CE_aK = @view c_next_CE[:, n_i+1, ϵ_i]
+							EV_next_aK = @view EV_next[:, n_i+1, ϵ_i, inf_i]
+							c_next_CE_aK = @view c_next_CE[:, n_i+1, ϵ_i, inf_i]
 							fertile_step!(V_endo, a_endo, ap_endo,
 								EV_next_a, c_next_CE_a, EV_next_aK, c_next_CE_aK,
 								V_current_a, c_current_a, a_p_current_a, e_current_a, K_current_a,
@@ -1272,7 +1324,7 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
 								parameters, w_bar, P, e_bar, n)
 						end
 					else
-						if n_i == 1
+						if n == 0.0
 							retired_step!(V_endo, a_endo, ap_endo, EV_next_a, c_next_CE_a, V_current_a, c_current_a, a_p_current_a, parameters, w_bar)
 						else
 							infertile_step!(V_endo, a_endo, ap_endo, EV_next_a, c_next_CE_a, V_current_a, c_current_a, a_p_current_a, e_current_a, parameters, w_bar, P, e_bar, n)
@@ -1881,40 +1933,40 @@ end#==============================##==============================#
 
 # solve stationary equilibrium #
 
-parameters = parameters_function()
+parameters = parameters_function(q_bar = 0.70)
 variables = variables_function(parameters)
 solve_value_and_policy_function!(variables, parameters)
-save_JLD_function!(variables, parameters, filename = "workspace_benchmark.jld2")
+# save_JLD_function!(variables, parameters, filename = "workspace_benchmark.jld2")
 
-parameters_lr_exp_1 = parameters_function(lr_exp = 1)
-variables_lr_exp_1 = variables_function(parameters_lr_exp_1)
-solve_value_and_policy_function!(variables_lr_exp_1, parameters_lr_exp_1)
-save_JLD_function!(variables_lr_exp_1, parameters_lr_exp_1, filename = "workspace_lr_exp_1.jld2")
+# parameters_lr_exp_1 = parameters_function(lr_exp = 1)
+# variables_lr_exp_1 = variables_function(parameters_lr_exp_1)
+# solve_value_and_policy_function!(variables_lr_exp_1, parameters_lr_exp_1)
+# save_JLD_function!(variables_lr_exp_1, parameters_lr_exp_1, filename = "workspace_lr_exp_1.jld2")
 
-parameters_lr_exp_2 = parameters_function(lr_exp = 2)
-variables_lr_exp_2 = variables_function(parameters_lr_exp_2)
-solve_value_and_policy_function!(variables_lr_exp_2, parameters_lr_exp_2)
-save_JLD_function!(variables_lr_exp_2, parameters_lr_exp_2, filename = "workspace_lr_exp_2.jld2")
+# parameters_lr_exp_2 = parameters_function(lr_exp = 2)
+# variables_lr_exp_2 = variables_function(parameters_lr_exp_2)
+# solve_value_and_policy_function!(variables_lr_exp_2, parameters_lr_exp_2)
+# save_JLD_function!(variables_lr_exp_2, parameters_lr_exp_2, filename = "workspace_lr_exp_2.jld2")
 
-parameters_lr_exp_3 = parameters_function(lr_exp = 3)
-variables_lr_exp_3 = variables_function(parameters_lr_exp_3)
-solve_value_and_policy_function!(variables_lr_exp_3, parameters_lr_exp_3)
-save_JLD_function!(variables_lr_exp_3, parameters_lr_exp_3, filename = "workspace_lr_exp_3.jld2")
+# parameters_lr_exp_3 = parameters_function(lr_exp = 3)
+# variables_lr_exp_3 = variables_function(parameters_lr_exp_3)
+# solve_value_and_policy_function!(variables_lr_exp_3, parameters_lr_exp_3)
+# save_JLD_function!(variables_lr_exp_3, parameters_lr_exp_3, filename = "workspace_lr_exp_3.jld2")
 
-parameters_lr_exp_4 = parameters_function(lr_exp = 4)
-variables_lr_exp_4 = variables_function(parameters_lr_exp_4)
-solve_value_and_policy_function!(variables_lr_exp_4, parameters_lr_exp_4)
-save_JLD_function!(variables_lr_exp_4, parameters_lr_exp_4, filename = "workspace_lr_exp_4.jld2")
+# parameters_lr_exp_4 = parameters_function(lr_exp = 4)
+# variables_lr_exp_4 = variables_function(parameters_lr_exp_4)
+# solve_value_and_policy_function!(variables_lr_exp_4, parameters_lr_exp_4)
+# save_JLD_function!(variables_lr_exp_4, parameters_lr_exp_4, filename = "workspace_lr_exp_4.jld2")
 
-parameters_lr_exp_5 = parameters_function(lr_exp = 5)
-variables_lr_exp_5 = variables_function(parameters_lr_exp_5)
-solve_value_and_policy_function!(variables_lr_exp_5, parameters_lr_exp_5)
-save_JLD_function!(variables_lr_exp_5, parameters_lr_exp_5, filename = "workspace_lr_exp_5.jld2")
+# parameters_lr_exp_5 = parameters_function(lr_exp = 5)
+# variables_lr_exp_5 = variables_function(parameters_lr_exp_5)
+# solve_value_and_policy_function!(variables_lr_exp_5, parameters_lr_exp_5)
+# save_JLD_function!(variables_lr_exp_5, parameters_lr_exp_5, filename = "workspace_lr_exp_5.jld2")
 
-parameters_lr_exp_6 = parameters_function(lr_exp = 6)
-variables_lr_exp_6 = variables_function(parameters_lr_exp_6)
-solve_value_and_policy_function!(variables_lr_exp_6, parameters_lr_exp_6)
-save_JLD_function!(variables_lr_exp_6, parameters_lr_exp_6, filename = "workspace_lr_exp_6.jld2")#===========##===========#
+# parameters_lr_exp_6 = parameters_function(lr_exp = 6)
+# variables_lr_exp_6 = variables_function(parameters_lr_exp_6)
+# solve_value_and_policy_function!(variables_lr_exp_6, parameters_lr_exp_6)
+# save_JLD_function!(variables_lr_exp_6, parameters_lr_exp_6, filename = "workspace_lr_exp_6.jld2")
 
 # parameters_low_inf = parameters_function(inf_scale=0.5)
 # variables_low_inf = variables_function(parameters_low_inf)
@@ -1935,6 +1987,156 @@ save_JLD_function!(variables_lr_exp_6, parameters_lr_exp_6, filename = "workspac
 # variables_edu_h_low_σ = variables_function(parameters_edu_h_low_σ)
 # solve_value_and_policy_edu_function!(variables_edu_h_low_σ, parameters_edu_h_low_σ)
 # save_JLD_function!(variables_edu_h_low_σ, parameters_edu_h_low_σ, filename = "workspace_edu_h_low_σ.jld2")
+
+# checking plots #
+
+ϵ_ind = 1
+ν_ind = 1
+age_ind = 6
+
+plot_K_a = plot(
+    box=:on,
+    size=[800, 600],
+    # xlim=[0, 80],
+    # xticks=0:10:80,
+    ylim=[-0.1, 1.1],
+    yticks=0:1:1,
+    xtickfont=font(16, "Computer Modern", :black),
+    ytickfont=font(16, "Computer Modern", :black),
+    legendfont=font(16, "Computer Modern", :black),
+    guidefont=font(18, "Computer Modern", :black),
+    titlefont=font(18, "Computer Modern", :black),
+    margin=4mm,
+    xlabel="Asset",
+    ylabel="New Child",
+	legend=:right
+)
+
+plot_K_a = plot!(
+    parameters.a_grid,
+    variables.policy_K[:,1,ϵ_ind,ν_ind,1,age_ind],
+    label="Age $(parameters.age_grid[age_ind])",
+    lw=3,
+    lc=:blue
+)
+
+plot_K_a = plot!(
+    parameters.a_grid,
+    variables.policy_K[:,1,ϵ_ind,ν_ind,1,age_ind+1],
+    label="Age $(parameters.age_grid[age_ind+1])",
+    lw=3,
+    lc=:red,
+	ls=:dash
+)
+
+plot_K_a = plot!(
+    parameters.a_grid,
+    variables.policy_K[:,1,ϵ_ind,ν_ind,1,age_ind+2],
+    label="Age $(parameters.age_grid[age_ind+2])",
+    lw=3,
+    lc=:black,
+	ls=:dot	
+)
+
+savefig(plot_K_a, string("plot_K_a.pdf"))
+
+
+a_ind = 10
+ν_ind = 1
+age_ind = 7
+
+plot_K_ϵ = plot(
+    box=:on,
+    size=[800, 600],
+    ylim=[-0.1, 1.1],
+    yticks=0:1:1,
+    xtickfont=font(16, "Computer Modern", :black),
+    ytickfont=font(16, "Computer Modern", :black),
+    legendfont=font(16, "Computer Modern", :black),
+    guidefont=font(18, "Computer Modern", :black),
+    titlefont=font(18, "Computer Modern", :black),
+    margin=4mm,
+    xlabel="Persistent Income",
+    ylabel="New Child",
+	legend=:left
+)
+
+plot_K_ϵ = plot!(
+    parameters.ϵ_grid,
+    variables.policy_K[a_ind,1,:,ν_ind,1,age_ind],
+    label="Age $(parameters.age_grid[age_ind])",
+    lw=3,
+    lc=:blue
+)
+
+plot_K_ϵ = plot!(
+    parameters.ϵ_grid,
+    variables.policy_K[a_ind,1,:,ν_ind,1,age_ind+1],
+    label="Age $(parameters.age_grid[age_ind+1])",
+    lw=3,
+    lc=:red,
+	ls=:dash
+)
+
+plot_K_ϵ = plot!(
+    parameters.ϵ_grid,
+    variables.policy_K[a_ind,1,:,ν_ind,1,age_ind+2],
+    label="Age $(parameters.age_grid[age_ind+2])",
+    lw=3,
+    lc=:black,
+	ls=:dot	
+)
+
+savefig(plot_K_ϵ, string("plot_K_ϵ.pdf"))
+
+
+a_ind = 12
+ϵ_ind = 4
+age_ind = 7
+
+plot_K_ν = plot(
+    box=:on,
+    size=[800, 600],
+    ylim=[-0.1, 1.1],
+    yticks=0:1:1,
+    xtickfont=font(16, "Computer Modern", :black),
+    ytickfont=font(16, "Computer Modern", :black),
+    legendfont=font(16, "Computer Modern", :black),
+    guidefont=font(18, "Computer Modern", :black),
+    titlefont=font(18, "Computer Modern", :black),
+    margin=4mm,
+    xlabel="Transitory Income",
+    ylabel="New Child",
+	legend=:left
+)
+
+plot_K_ν = plot!(
+    parameters.ν_grid,
+    variables.policy_K[a_ind,1,ϵ_ind,:,1,age_ind],
+    label="Age $(parameters.age_grid[age_ind])",
+    lw=3,
+    lc=:blue
+)
+
+plot_K_ν = plot!(
+    parameters.ν_grid,
+    variables.policy_K[a_ind,1,ϵ_ind,:,1,age_ind+1],
+    label="Age $(parameters.age_grid[age_ind+1])",
+    lw=3,
+    lc=:red,
+	ls=:dash
+)
+
+plot_K_ν = plot!(
+    parameters.ν_grid,
+    variables.policy_K[a_ind,1,ϵ_ind,:,1,age_ind+2],
+    label="Age $(parameters.age_grid[age_ind+2])",
+    lw=3,
+    lc=:black,
+	ls=:dot	
+)
+
+savefig(plot_K_ν, string("plot_K_ν.pdf"))
 
 
 # simuation #
