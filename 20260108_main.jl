@@ -2141,6 +2141,177 @@ savefig(plot_K_ν, string("plot_K_ν.pdf"))
 
 # simuation #
 
+function make_thread_rngs(seed::Int, num_threads::Int)
+    key = (UInt64(seed), UInt64(0))
+    return [Philox4x(UInt64, key) for _ in 1:num_threads]
+end
+
+@inline base_counter(h_id::UInt64, t_id::UInt64)::UInt64 = (h_id << 44) | (t_id << 24)
+
+struct SimulatedPanel{TF<:AbstractFloat,TI<:Integer}
+	a_state::Matrix{TI}
+	n_state::Matrix{TI}
+	max_n_state::Vector{TI}
+	ϵ_state::Matrix{TI}
+    ν_state::Matrix{TI}
+    inf_state::Matrix{TI}
+    ap_choice::Matrix{TI}
+    e_choice::Matrix{TI}
+    c_choice::Matrix{TI}
+    K_choice::Matrix{TI}
+end
+
+@inline advance_rng!(rng::Philox4x{UInt64}) = (rand(rng); true)
+
+@inline function newborn_bundle_draw(rng::Philox4x{UInt64},
+    e1_cat::Categorical, e2_cat::Categorical, e3_cat::Categorical)::NamedTuple
+    newborn_i = advance_rng!(rng)
+    e1_i = rand(rng, e1_cat)
+    e2_i = rand(rng, e2_cat)
+    e3_i = rand(rng, e3_cat)
+    nd_i = Float64(advance_rng!(rng))
+    good_history_i = advance_rng!(rng)
+    return (newborn=newborn_i, e1=e1_i, e2=e2_i, e3=e3_i, nd=nd_i, good_history=good_history_i)
+end
+
+@inline @inbounds function newborn_assignment!(cache::SimulItpCache, panel::SimulatedPanel, draw::NamedTuple, t_i::Int, h_i::Int, W::AbstractArray{Float64,3})
+    # @assert draw.newborn "Not newborn household"
+    panel.newborn[t_i, h_i] = draw.newborn
+    panel.age[t_i, h_i] = 1
+    panel.e1_state[t_i, h_i] = draw.e1
+    panel.e2_state[t_i, h_i] = draw.e2
+    panel.e3_state[t_i, h_i] = draw.e3
+    panel.earnings_state[t_i, h_i] = W[draw.e3, draw.e2, draw.e1]
+    panel.asset_state[t_i, h_i] = 0.0
+    panel.good_history[t_i, h_i] = draw.good_history
+    panel.default_choice[t_i, h_i] = !(draw.nd == 1.0)
+    asset_choice_itp = cache.policy_a_itp[draw.e3, draw.e2, draw.e1](0.0)
+    panel.asset_choice[t_i, h_i] = asset_choice_itp
+    discounted_price_itp = cache.q_itp[draw.e2, draw.e1](asset_choice_itp)
+    panel.discounted_price[t_i, h_i] = discounted_price_itp
+    panel.interest_rate[t_i, h_i] = 1.0 / discounted_price_itp - 1.0
+    panel.consumption[t_i, h_i] = panel.earnings_state[t_i, h_i] - discounted_price_itp * asset_choice_itp
+    return nothing
+end
+
+@inline function bundle_draw(rng::Philox4x{UInt64}, ρ::Float64, Ph::Float64,
+    e1_cat::Categorical, e1_Γ_cat_::Categorical, e2_cat::Categorical, e2_Γ_cat_::Categorical,
+    e3_cat::Categorical)::NamedTuple
+    newborn_i = rand(rng) > ρ
+    e1_i = newborn_i ? rand(rng, e1_cat) : rand(rng, e1_Γ_cat_)
+    e2_i = newborn_i ? rand(rng, e2_cat) : rand(rng, e2_Γ_cat_)
+    e3_i = rand(rng, e3_cat)
+    nd_i = newborn_i ? Float64(advance_rng!(rng)) : rand(rng)
+    good_history_i = newborn_i ? advance_rng!(rng) : rand(rng) <= Ph
+    return (newborn=newborn_i, e1=e1_i, e2=e2_i, e3=e3_i, nd=nd_i, good_history=good_history_i)
+end
+
+@inline @inbounds function assignment!(cache::SimulItpCache, panel::SimulatedPanel, draw::NamedTuple, t_i::Int, h_i::Int,
+    W::AbstractArray{Float64,3}, c_d::AbstractArray{Float64,3})
+    # @assert !draw.newborn "Unexpected newborn household"
+    panel.newborn[t_i, h_i] = false
+    panel.age[t_i, h_i] = panel.age[t_i-1, h_i] + 1
+    panel.e1_state[t_i, h_i] = draw.e1
+    panel.e2_state[t_i, h_i] = draw.e2
+    panel.e3_state[t_i, h_i] = draw.e3
+    panel.earnings_state[t_i, h_i] = W[draw.e3, draw.e2, draw.e1]
+    panel.asset_state[t_i, h_i] = panel.asset_choice[t_i-1, h_i]
+    # @assert !panel.good_history[t_i-1, h_i] & (panel.asset_state[t_i, h_i] >= 0.0) "Bad history HHs cannot borrow"
+    panel.good_history[t_i, h_i] = panel.good_history[t_i-1, h_i] | draw.good_history
+    if panel.good_history[t_i, h_i]
+        panel.default_choice[t_i, h_i] = cache.policy_d_itp[draw.e3, draw.e2, draw.e1](panel.asset_state[t_i, h_i]) ≥ draw.nd
+        if panel.default_choice[t_i, h_i]
+            panel.asset_choice[t_i, h_i] = 0.0
+            panel.good_history[t_i, h_i] = false
+            panel.consumption[t_i, h_i] = c_d[draw.e3, draw.e2, draw.e1]
+        else
+            asset_choice_itp = cache.policy_a_itp[draw.e3, draw.e2, draw.e1](panel.asset_state[t_i, h_i])
+            panel.asset_choice[t_i, h_i] = asset_choice_itp
+            discounted_price_itp = cache.q_itp[draw.e2, draw.e1](asset_choice_itp)
+            panel.discounted_price[t_i, h_i] = discounted_price_itp
+            panel.interest_rate[t_i, h_i] = 1.0 / discounted_price_itp - 1.0
+            panel.consumption[t_i, h_i] = panel.earnings_state[t_i, h_i] + panel.asset_state[t_i, h_i] - discounted_price_itp * asset_choice_itp
+        end
+    else
+        asset_choice_itp = cache.policy_a_pos_itp[draw.e3, draw.e2, draw.e1](panel.asset_state[t_i, h_i])
+        panel.asset_choice[t_i, h_i] = asset_choice_itp
+        discounted_price_itp = cache.q_itp[draw.e2, draw.e1](asset_choice_itp)
+        panel.discounted_price[t_i, h_i] = discounted_price_itp
+        panel.interest_rate[t_i, h_i] = 1.0 / discounted_price_itp - 1.0
+        panel.consumption[t_i, h_i] = panel.earnings_state[t_i, h_i] + panel.asset_state[t_i, h_i] - discounted_price_itp * asset_choice_itp
+    end
+    return nothing
+end
+
+function initialize_panel(; num_households::Int64=80000, num_periods::Int64=80, IntT::Type{<:Integer}=Int64)
+
+    @assert 0 < num_households <= 2^20 "The number of households exceeds 20-bit capacity"
+    @assert 0 < num_periods <= 2^20 "The number of periods exceeds 20-bit capacity"
+
+    a_state = Matrix{IntT}(undef, num_periods, num_households)
+    n_state = Matrix{IntT}(undef, num_periods, num_households)
+    max_n_state = Matrix{IntT}(undef, num_periods, num_households)
+	ϵ_state = Matrix{IntT}(undef, num_periods, num_households)
+    ν_state = Matrix{IntT}(undef, num_periods, num_households)
+    inf_state = Matrix{IntT}(undef, num_periods, num_households)
+    ap_choice = Matrix{IntT}(undef, num_periods, num_households)
+    e_choice = Matrix{IntT}(undef, num_periods, num_households)
+    c_choice = Matrix{IntT}(undef, num_periods, num_households)
+    K_choice = Matrix{IntT}(undef, num_periods, num_households)
+
+    return SimulatedPanel{IntT}(
+        a_state, n_state, max_n_state, ϵ_state, ν_state, inf_state,
+        ap_choice, e_choice, c_choice, K_choice
+    )
+end
+
+@inbounds function simulate_household_panel!(simul_panel::SimulatedPanel, simul_itp_cache::SimulItpCache, parameters::NamedTuple; seed::Int=1124)
+
+    num_periods, num_households = size(simul_panel.newborn)
+    num_threads = Threads.nthreads()
+    rngs = make_thread_rngs(seed, num_threads)
+
+    @unpack ϵ_G, ϵ_Γ, ϵ_size, ν_G, ν_Γ, ν_size, inf_grid = parameters
+
+    ϵ_cat = Categorical(ϵ_G)
+    ϵ_Γ_cat = [Categorical(ϵ_Γ[ϵ_i, :]) for ϵ_i in 1:ϵ_size]
+    e2_cat = Categorical(ν_G)
+    e2_Γ_cat = [Categorical(e2_Γ[e2_i, :]) for e2_i in 1:e2_size]
+    e3_cat = Categorical(e3_G)
+
+    # @showprogress
+    prog_bar = Progress(num_households; dt=0.1, desc="Simulation progress:", barglyphs=BarGlyphs("[=> ]"))
+    Threads.@threads for h_i in 1:num_households
+
+        thread_id = Threads.threadid()
+        rng = rngs[thread_id]
+        h_id = UInt64(h_i)
+        h1_id = base_counter(h_id, UInt64(1))
+        set_counter!(rng, h1_id)
+        draw = newborn_bundle_draw(rng, e1_cat, e2_cat, e3_cat)
+        newborn_assignment!(simul_itp_cache, simul_panel, draw, 1, h_i, W)
+
+        for t_i in 2:num_periods
+
+            ht_id = base_counter(h_id, UInt64(t_i))
+            set_counter!(rng, ht_id)
+            e1_Γ_cat_ = e1_Γ_cat[simul_panel.e1_state[t_i-1, h_i]]
+            e2_Γ_cat_ = e2_Γ_cat[simul_panel.e2_state[t_i-1, h_i]]
+            draw = bundle_draw(rng, ρ, Ph, e1_cat, e1_Γ_cat_, e2_cat, e2_Γ_cat_, e3_cat)
+
+            if draw.newborn
+                newborn_assignment!(simul_itp_cache, simul_panel, draw, t_i, h_i, W)
+            else
+                assignment!(simul_itp_cache, simul_panel, draw, t_i, h_i, W, c_d)
+            end
+        end
+        next!(prog_bar)
+    end
+    finish!(prog_bar)
+
+    return nothing
+end
+
 function simulation_function(; num_hh::Int = 50000, filename::String)
 	"""
 	simulate variable panels for a given set of policy functions
