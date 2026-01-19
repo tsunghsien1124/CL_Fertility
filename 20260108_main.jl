@@ -171,7 +171,7 @@ function parameters_function(;
 	ψ::Real = 3.50,                   # preference scale
 	μ::Real = 0.35,                   # production share
 	θ::Real = 0.70,                   # elasticity of substitution in production
-	q_bar::Real = 1.40,               # lower bound on children's consumption
+	q_bar::Real = 1.50,               # lower bound on children's consumption
 	ψ_1::Real = 0.91,                 # HH economies to money input to production
 	ψ_2::Real = 0.54,                 # HH economies to time input to production
 	p::Real = 0.02, #====================##====================#                   # prob that a child becomes independent
@@ -188,7 +188,7 @@ function parameters_function(;
 	ν_size::Integer = 5,              # number of transitory shock
 	a_max::Real = 120,                # max of asset holding
 	a_size_neg::Integer = 11,         # number of negative asset
-	a_size::Integer = 50,             # number of asset
+	a_size::Integer = 100,            # number of asset
 	a_degree::Integer = 2,            # curvature of asset gridpoints
 	q_x::Real = 1.0, #=================##=================#                  # price of monetary input $x$
 
@@ -1338,602 +1338,19 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
 	return nothing
 end
 
-function solve_value_and_policy_edu_function!(variables::Mutable_Variables, parameters::NamedTuple)
-	"""
-	Compute value and policy functions with education choice
-	"""
-
-	# unpack parameters
-	@unpack age_size, age_grid, age_max, age_min, age_ret, age_inf, age_edu = parameters
-	@unpack ν_size, ν_grid, ν_Γ = parameters
-	@unpack ϵ_size, ϵ_grid, ϵ_Γ = parameters
-	@unpack n_size, n_grid, n_Γ, n_max = parameters
-	@unpack a_size, a_grid, a_ind_zero = parameters
-	@unpack l_size, l_grid, x_size, x_grid = parameters
-	@unpack inf_size, inf_grid = parameters
-	@unpack h_grid = parameters
-	@unpack b, r, γ, ψ, κ, β, μ, θ, ψ_1, ψ_2, q_bar, q_x, d_κ = parameters
-
-	# index 
-	ind_max_ret = collect(Iterators.product(1:ν_size, 1:ϵ_size, 1:a_size))
-	ind_ret_inf = collect(Iterators.product(1:ν_size, 1:ϵ_size, 1:n_size, 1:a_size))
-	ind_ret_inf_EV = collect(Iterators.product(1:ϵ_size, 1:n_size, 1:a_size))
-	ind_inf_min = collect(Iterators.product(1:inf_size, 1:ν_size, 1:ϵ_size, 1:n_size, 1:a_size))
-	ind_inf_min_EV = collect(Iterators.product(1:inf_size, 1:ϵ_size, 1:n_size, 1:a_size))
-	ind_edu = collect(Iterators.product(1:inf_size, 1:ν_size, 1:ϵ_size, 1:a_size))
-	ind_edu_EV = collect(Iterators.product(1:inf_size, 1:ϵ_size, 1:a_size))
-
-	# container
-	c_a = Array{Float64}(undef, (a_size, a_size))
-	for a_i ∈ 1:a_size, a_p_i ∈ 1:a_size
-		c_a[a_i, a_p_i] = (1.0 + r) * a_grid[a_i] - a_grid[a_p_i]
-	end
-	EV = Array{Float64}(undef, (a_size, n_size, ϵ_size))
-	EV_inf = Array{Float64}(undef, (a_size, n_size, ϵ_size, inf_size))
-	EV_edu = Array{Float64}(undef, (a_size, ϵ_size, inf_size))
-
-	# loop over all states
-	for age_i ∈ age_size:(-1):1 # (age_inf-age_min)
-		# for age_i = age_size:(-1):(age_ret-age_min+2)
-		age = age_grid[age_i]
-		h = h_grid[age_i]
-		println("Solving the problem of HH at age $age...")
-		if age == age_max # terminal condition
-			Threads.@threads for (ν_i, ϵ_i, a_i) in ind_max_ret
-				ν = ν_grid[ν_i]
-				ϵ = ϵ_grid[ϵ_i]
-				w_bar = exp(h + ϵ + ν) * b
-				# a = a_grid[a_i]
-				# @inbounds variables.V[a_i, 1, ϵ_i, ν_i, 2, age_i] = utility_function((1.0 + r) * a + w_bar, 0.0, 0.0, γ, ψ, κ, q_bar)
-				@inbounds variables.V[a_i, 1, ϵ_i, ν_i, 2, age_i] = utility_function(c_a[a_i, 1] + w_bar, 0.0, 0.0, γ, ψ, κ, q_bar)
-			end
-		elseif age_ret < age < age_max # after retirement
-			Threads.@threads for (ν_i, ϵ_i, a_i) in ind_max_ret
-				ν = ν_grid[ν_i]
-				ϵ = ϵ_grid[ϵ_i]
-				w_bar = exp(h + ϵ + ν) * b
-				# a = a_grid[a_i]
-				V_best = -10^16
-				best_a_p_i = 1
-				for a_p_i in 1:a_size
-					# a_p = a_grid[a_p_i]
-					# c = (1.0 + r) * a + w_bar - a_p
-					@inbounds c = c_a[a_i, a_p_i] + w_bar
-					if c > 0.0
-						temp = utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar) + β * variables.V[a_p_i, 1, ϵ_i, ν_i, 2, age_i+1]
-						if temp > V_best
-							V_best = temp
-							best_a_p_i = a_p_i
-						end
-					end
-				end
-				@inbounds variables.V[a_i, 1, ϵ_i, ν_i, 2, age_i] = V_best
-				@inbounds variables.policy_a_p[a_i, 1, ϵ_i, ν_i, 2, age_i] = best_a_p_i
-			end
-		elseif age == age_ret # at retirement age
-			Threads.@threads for (ν_i, ϵ_i, n_i, a_i) in ind_ret_inf
-				# println("($ν_i, $ϵ_i, $n_i, $a_i)")
-				ν = ν_grid[ν_i]
-				ϵ = ϵ_grid[ϵ_i]
-				w = exp(h + ϵ + ν)
-				n = n_grid[n_i]
-				# a = a_grid[a_i]
-				if n == 0
-					V_best = -10^16
-					best_a_p_i = 1
-					for a_p_i in 1:a_size
-						# a_p = a_grid[a_p_i]
-						# c = (1.0 + r) * a + w - a_p
-						@inbounds c = c_a[a_i, a_p_i] + w
-						if c > 0.0
-							@inbounds temp = utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar) + β * variables.V[a_p_i, 1, ϵ_i, ν_i, 2, age_i+1]
-							if temp > V_best
-								V_best = temp
-								best_a_p_i = a_p_i
-							end
-						end
-					end
-					@inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_best
-					@inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_a_p_i
-				else
-					V_best = -10^16
-					best_a_p_i, best_x_i, best_l_i = 1, 1, 1
-					for a_p_i in 1:a_size, x_i in 1:x_size, l_i in 1:l_size
-						# println("($a_p_i, $x_i, $l_i)")
-						# a_p = a_grid[a_p_i]
-						x = x_grid[x_i]
-						l = l_grid[l_i]
-						# c = (1.0 + r) * a + (1.0 - l) * w - a_p - q_x * x
-						@inbounds c = c_a[a_i, a_p_i] + (1.0 - l) * w - q_x * x
-						if c > 0.0
-							q = quality_function(x, l, n, μ, θ, ψ_1, ψ_2)
-							if q >= q_bar
-								@inbounds temp = utility_function(c, n, q, γ, ψ, κ, q_bar) + β * variables.V[a_p_i, 1, ϵ_i, ν_i, 2, age_i+1]
-								if temp > V_best
-									V_best = temp
-									best_a_p_i = a_p_i
-									best_x_i = x_i
-									best_l_i = l_i
-								end
-							end
-						end
-					end
-					@inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_best
-					@inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_a_p_i
-					@inbounds variables.policy_x[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_x_i
-					@inbounds variables.policy_l[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_l_i
-				end
-			end
-		elseif age_inf < age < age_ret # berween infertile age and retirement age
-			@inbounds EV .= 0.0
-			Threads.@threads for (ϵ_i, n_i, a_p_i) in ind_ret_inf_EV
-				for ν_p_i in 1:ν_size, ϵ_p_i ∈ 1:ϵ_size, n_p_i ∈ 1:n_size
-					@inbounds EV[a_p_i, n_i, ϵ_i] += n_Γ[n_i, n_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, n_p_i, ϵ_p_i, ν_p_i, 2, age_i+1]
-				end
-			end
-			Threads.@threads for (ν_i, ϵ_i, n_i, a_i) in ind_ret_inf
-				ν = ν_grid[ν_i]
-				ϵ = ϵ_grid[ϵ_i]
-				n = n_grid[n_i]
-				# a = a_grid[a_i]
-				w = exp(h + ϵ + ν)
-				if n == 0
-					V_best = -10^16
-					best_a_p_i = 1
-					for a_p_i ∈ 1:a_size
-						# a_p = a_grid[a_p_i]
-						# c = (1.0 + r) * a + w - a_p
-						@inbounds c = c_a[a_i, a_p_i] + w
-						if c > 0.0
-							@inbounds temp = utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar) + β * EV[a_p_i, 1, ϵ_i]
-							if temp > V_best
-								V_best = temp
-								best_a_p_i = a_p_i
-							end
-						end
-					end
-					@inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_best
-					@inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_a_p_i
-				else
-					V_best = -10^16
-					best_a_p_i, best_x_i, best_l_i = 1, 1, 1
-					for a_p_i in 1:a_size, x_i in 1:x_size, l_i in 1:l_size
-						# a_p = a_grid[a_p_i]
-						x = x_grid[x_i]
-						l = l_grid[l_i]
-						# c = (1.0 + r) * a + (1.0 - l) * w - a_p - q_x * x
-						@inbounds c = c_a[a_i, a_p_i] + (1.0 - l) * w - q_x * x
-						if c > 0.0
-							q = quality_function(x, l, n, μ, θ, ψ_1, ψ_2)
-							if q >= q_bar
-								@inbounds temp = utility_function(c, n, q, γ, ψ, κ, q_bar) + β * EV[a_p_i, n_i, ϵ_i]
-								if temp > V_best
-									V_best = temp
-									best_a_p_i = a_p_i
-									best_x_i = x_i
-									best_l_i = l_i
-								end
-							end
-						end
-					end
-					@inbounds variables.V[a_i, n_i, ϵ_i, ν_i, 2, age_i] = V_best
-					@inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_a_p_i
-					@inbounds variables.policy_x[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_x_i
-					@inbounds variables.policy_l[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_l_i
-				end
-			end
-		elseif age == age_inf # about to be infertile
-			@inbounds EV .= 0.0
-			Threads.@threads for (ϵ_i, n_i, a_p_i) in ind_ret_inf_EV
-				for ν_p_i in 1:ν_size, ϵ_p_i ∈ 1:ϵ_size, n_p_i ∈ 1:n_size
-					@inbounds EV[a_p_i, n_i, ϵ_i] += n_Γ[n_i, n_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, n_p_i, ϵ_p_i, ν_p_i, 2, age_i+1]
-				end
-			end
-			Threads.@threads for (f_i, ν_i, ϵ_i, n_i, a_i) in ind_inf_min
-				ν = ν_grid[ν_i]
-				ϵ = ϵ_grid[ϵ_i]
-				n = n_grid[n_i]
-				# a = a_grid[a_i]
-				w = exp(h + ϵ + ν)
-				if n == 0
-
-					if f_i == 1
-
-						V_best_0, V_best_1 = -10^16, -10^16
-						best_0_a_p_i, best_1_a_p_i = 1, 1
-						for a_p_i ∈ 1:a_size
-							# a_p = a_grid[a_p_i]
-							# c = (1.0 + r) * a + w - a_p
-							@inbounds c = c_a[a_i, a_p_i] + w
-							if c > 0.0
-								u_c = utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar)
-								@inbounds temp_0 = u_c + β * EV[a_p_i, 1, ϵ_i]
-								@inbounds temp_1 = u_c + β * EV[a_p_i, 2, ϵ_i]
-								if temp_0 > V_best_0
-									V_best_0 = temp_0
-									best_0_a_p_i = a_p_i
-								end
-								if temp_1 > V_best_1
-									V_best_1 = temp_1
-									best_1_a_p_i = a_p_i
-								end
-							end
-						end
-
-						if V_best_0 >= V_best_1
-							@inbounds variables.V[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = V_best_0
-							@inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_0_a_p_i
-						else
-							@inbounds variables.V[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = V_best_1
-							@inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_1_a_p_i
-							@inbounds variables.policy_K[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = 2
-						end
-
-					else
-
-						V_best = -10^16
-						best_a_p_i = 1
-						for a_p_i ∈ 1:a_size
-							# a_p = a_grid[a_p_i]
-							# c = (1.0 + r) * a + w - a_p
-							@inbounds c = c_a[a_i, a_p_i] + w
-							if c > 0.0
-								@inbounds temp = utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar) + β * EV[a_p_i, 1, ϵ_i]
-								if temp > V_best
-									V_best = temp
-									best_a_p_i = a_p_i
-								end
-							end
-						end
-						@inbounds variables.V[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = V_best
-						@inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_a_p_i
-
-					end
-
-				elseif n == n_max
-
-					V_best = -10^16
-					best_a_p_i, best_x_i, best_l_i = 1, 1, 1
-					for a_p_i in 1:a_size, x_i in 1:x_size, l_i in 1:l_size
-						# a_p = a_grid[a_p_i]
-						x = x_grid[x_i]
-						l = l_grid[l_i]
-						# c = (1.0 + r) * a + (1.0 - l) * w - a_p - q_x * x
-						@inbounds c = c_a[a_i, a_p_i] + (1.0 - l) * w - q_x * x
-						if c > 0.0
-							q = quality_function(x, l, n, μ, θ, ψ_1, ψ_2)
-							if q >= q_bar
-								@inbounds temp = utility_function(c, n, q, γ, ψ, κ, q_bar) + β * EV[a_p_i, n_i, ϵ_i]
-								if temp > V_best
-									V_best = temp
-									best_a_p_i = a_p_i
-									best_x_i = x_i
-									best_l_i = l_i
-								end
-							end
-						end
-					end
-					@inbounds variables.V[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = V_best
-					@inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_a_p_i
-					@inbounds variables.policy_x[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_x_i
-					@inbounds variables.policy_l[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_l_i
-
-				else
-
-					if f_i == 1
-
-						V_best_0, V_best_1 = -10^16, -10^16
-						best_0_a_p_i, best_1_a_p_i = 1, 1
-						best_0_x_i, best_1_x_i = 1, 1
-						best_0_l_i, best_1_l_i = 1, 1
-						for a_p_i ∈ 1:a_size, x_i in 1:x_size, l_i in 1:l_size
-							# a_p = a_grid[a_p_i]
-							x = x_grid[x_i]
-							l = l_grid[l_i]
-							# c = (1.0 + r) * a + w - a_p
-							@inbounds c = c_a[a_i, a_p_i] + (1.0 - l) * w - q_x * x
-							if c > 0.0
-								q = quality_function(x, l, n, μ, θ, ψ_1, ψ_2)
-								if q >= q_bar
-									u_c = utility_function(c, n, q, γ, ψ, κ, q_bar)
-									@inbounds temp_0 = u_c + β * EV[a_p_i, n_i, ϵ_i]
-									@inbounds temp_1 = u_c + β * EV[a_p_i, n_i+1, ϵ_i]
-									if temp_0 > V_best_0
-										V_best_0 = temp_0
-										best_0_a_p_i = a_p_i
-										best_0_x_i = x_i
-										best_0_l_i = l_i
-									end
-									if temp_1 > V_best_1
-										V_best_1 = temp_1
-										best_1_a_p_i = a_p_i
-										best_1_x_i = x_i
-										best_1_l_i = l_i
-									end
-								end
-							end
-						end
-
-						if V_best_0 >= V_best_1
-							@inbounds variables.V[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = V_best_0
-							@inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_0_a_p_i
-							@inbounds variables.policy_x[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_0_x_i
-							@inbounds variables.policy_l[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_0_l_i
-
-						else
-							@inbounds variables.V[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = V_best_1
-							@inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_1_a_p_i
-							@inbounds variables.policy_x[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_1_x_i
-							@inbounds variables.policy_l[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_1_l_i
-							@inbounds variables.policy_K[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = 2
-						end
-
-					else
-
-						V_best = -10^16
-						best_a_p_i, best_x_i, best_l_i = 1, 1, 1
-						for a_p_i in 1:a_size, x_i in 1:x_size, l_i in 1:l_size
-							# a_p = a_grid[a_p_i]
-							x = x_grid[x_i]
-							l = l_grid[l_i]
-							# c = (1.0 + r) * a + (1.0 - l) * w - a_p - q_x * x
-							@inbounds c = c_a[a_i, a_p_i] + (1.0 - l) * w - q_x * x
-							if c > 0.0
-								q = quality_function(x, l, n, μ, θ, ψ_1, ψ_2)
-								if q >= q_bar
-									@inbounds temp = utility_function(c, n, q, γ, ψ, κ, q_bar) + β * EV[a_p_i, n_i, ϵ_i]
-									if temp > V_best
-										V_best = temp
-										best_a_p_i = a_p_i
-										best_x_i = x_i
-										best_l_i = l_i
-									end
-								end
-							end
-						end
-						@inbounds variables.V[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = V_best
-						@inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_a_p_i
-						@inbounds variables.policy_x[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_x_i
-						@inbounds variables.policy_l[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_l_i
-
-					end
-				end
-			end
-		elseif age_edu <= age < age_inf # b/w education and fertile age
-
-			@inbounds EV_inf .= 0.0
-			Threads.@threads for (f_i, ϵ_i, n_i, a_p_i) in ind_inf_min_EV
-				for ν_p_i in 1:ν_size, ϵ_p_i ∈ 1:ϵ_size, n_p_i ∈ 1:n_size
-					if f_i == 1
-						@inbounds EV_inf[a_p_i, n_i, ϵ_i, f_i] += (1.0 - inf_grid[age_i+1]) * n_Γ[n_i, n_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, n_p_i, ϵ_p_i, ν_p_i, 1, age_i+1]
-						@inbounds EV_inf[a_p_i, n_i, ϵ_i, f_i] += inf_grid[age_i+1] * n_Γ[n_i, n_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, n_p_i, ϵ_p_i, ν_p_i, 2, age_i+1]
-					else
-						@inbounds EV_inf[a_p_i, n_i, ϵ_i, f_i] += n_Γ[n_i, n_p_i] * ϵ_Γ[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, n_p_i, ϵ_p_i, ν_p_i, 2, age_i+1]
-					end
-				end
-			end
-			Threads.@threads for (f_i, ν_i, ϵ_i, n_i, a_i) in ind_inf_min
-				ν = ν_grid[ν_i]
-				ϵ = ϵ_grid[ϵ_i]
-				n = n_grid[n_i]
-				# a = a_grid[a_i]
-				w = exp(h + ϵ + ν)
-				if n == 0
-
-					if f_i == 1
-
-						V_best_0, V_best_1 = -10^16, -10^16
-						best_0_a_p_i, best_1_a_p_i = 1, 1
-						for a_p_i ∈ 1:a_size
-							# a_p = a_grid[a_p_i]
-							# c = (1.0 + r) * a + w - a_p
-							@inbounds c = c_a[a_i, a_p_i] + w
-							if c > 0.0
-								u_c = utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar)
-								@inbounds temp_0 = u_c + β * EV_inf[a_p_i, 1, ϵ_i, 1]
-								@inbounds temp_1 = u_c + β * EV_inf[a_p_i, 2, ϵ_i, 1]
-								if temp_0 > V_best_0
-									V_best_0 = temp_0
-									best_0_a_p_i = a_p_i
-								end
-								if temp_1 > V_best_1
-									V_best_1 = temp_1
-									best_1_a_p_i = a_p_i
-								end
-							end
-						end
-
-						if V_best_0 >= V_best_1
-							@inbounds variables.V[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = V_best_0
-							@inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_0_a_p_i
-						else
-							@inbounds variables.V[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = V_best_1
-							@inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_1_a_p_i
-							@inbounds variables.policy_K[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = 2
-						end
-
-					else
-
-						V_best = -10^16
-						best_a_p_i = 1
-						for a_p_i ∈ 1:a_size
-							# a_p = a_grid[a_p_i]
-							# c = (1.0 + r) * a + w - a_p
-							@inbounds c = c_a[a_i, a_p_i] + w
-							if c > 0.0
-								@inbounds temp = utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar) + β * EV_inf[a_p_i, 1, ϵ_i, 2]
-								if temp > V_best
-									V_best = temp
-									best_a_p_i = a_p_i
-								end
-							end
-						end
-						@inbounds variables.V[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = V_best
-						@inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_a_p_i
-
-					end
-
-				elseif n == n_max
-
-					V_best = -10^16
-					best_a_p_i, best_x_i, best_l_i = 1, 1, 1
-					for a_p_i in 1:a_size, x_i in 1:x_size, l_i in 1:l_size
-						# a_p = a_grid[a_p_i]
-						x = x_grid[x_i]
-						l = l_grid[l_i]
-						# c = (1.0 + r) * a + (1.0 - l) * w - a_p - q_x * x
-						@inbounds c = c_a[a_i, a_p_i] + (1.0 - l) * w - q_x * x
-						if c > 0.0
-							q = quality_function(x, l, n, μ, θ, ψ_1, ψ_2)
-							if q >= q_bar
-								@inbounds temp = utility_function(c, n, q, γ, ψ, κ, q_bar) + β * EV_inf[a_p_i, n_i, ϵ_i, f_i]
-								if temp > V_best
-									V_best = temp
-									best_a_p_i = a_p_i
-									best_x_i = x_i
-									best_l_i = l_i
-								end
-							end
-						end
-					end
-					@inbounds variables.V[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = V_best
-					@inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_a_p_i
-					@inbounds variables.policy_x[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_x_i
-					@inbounds variables.policy_l[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_l_i
-
-				else
-					if f_i == 1
-
-						V_best_0, V_best_1 = -10^16, -10^16
-						best_0_a_p_i, best_1_a_p_i = 1, 1
-						best_0_x_i, best_1_x_i = 1, 1
-						best_0_l_i, best_1_l_i = 1, 1
-						for a_p_i ∈ 1:a_size, x_i in 1:x_size, l_i in 1:l_size
-							# a_p = a_grid[a_p_i]
-							x = x_grid[x_i]
-							l = l_grid[l_i]
-							# c = (1.0 + r) * a + w - a_p
-							@inbounds c = c_a[a_i, a_p_i] + (1.0 - l) * w - q_x * x
-							if c > 0.0
-								q = quality_function(x, l, n, μ, θ, ψ_1, ψ_2)
-								if q >= q_bar
-									u_c = utility_function(c, n, q, γ, ψ, κ, q_bar)
-									@inbounds temp_0 = u_c + β * EV_inf[a_p_i, n_i, ϵ_i, f_i]
-									@inbounds temp_1 = u_c + β * EV_inf[a_p_i, n_i+1, ϵ_i, f_i]
-									if temp_0 > V_best_0
-										V_best_0 = temp_0
-										best_0_a_p_i = a_p_i
-										best_0_x_i = x_i
-										best_0_l_i = l_i
-									end
-									if temp_1 > V_best_1
-										V_best_1 = temp_1
-										best_1_a_p_i = a_p_i
-										best_1_x_i = x_i
-										best_1_l_i = l_i
-									end
-								end
-							end
-						end
-
-						if V_best_0 >= V_best_1
-							@inbounds variables.V[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = V_best_0
-							@inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_0_a_p_i
-							@inbounds variables.policy_x[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_0_x_i
-							@inbounds variables.policy_l[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_0_l_i
-
-						else
-							@inbounds variables.V[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = V_best_1
-							@inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_1_a_p_i
-							@inbounds variables.policy_x[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_1_x_i
-							@inbounds variables.policy_l[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_1_l_i
-							@inbounds variables.policy_K[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = 2
-						end
-
-					else
-
-						V_best = -10^16
-						best_a_p_i, best_x_i, best_l_i = 1, 1, 1
-						for a_p_i in 1:a_size, x_i in 1:x_size, l_i in 1:l_size
-							# a_p = a_grid[a_p_i]
-							x = x_grid[x_i]
-							l = l_grid[l_i]
-							# c = (1.0 + r) * a + (1.0 - l) * w - a_p - q_x * x
-							@inbounds c = c_a[a_i, a_p_i] + (1.0 - l) * w - q_x * x
-							if c > 0.0
-								q = quality_function(x, l, n, μ, θ, ψ_1, ψ_2)
-								if q >= q_bar
-									@inbounds temp = utility_function(c, n, q, γ, ψ, κ, q_bar) + β * EV_inf[a_p_i, n_i, ϵ_i, 2]
-									if temp > V_best
-										V_best = temp
-										best_a_p_i = a_p_i
-										best_x_i = x_i
-										best_l_i = l_i
-									end
-								end
-							end
-						end
-						@inbounds variables.V[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = V_best
-						@inbounds variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_a_p_i
-						@inbounds variables.policy_x[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_x_i
-						@inbounds variables.policy_l[a_i, n_i, ϵ_i, ν_i, f_i, age_i] = best_l_i
-					end
-				end
-			end
-		elseif age == age_min
-
-			@inbounds EV_edu .= 0.0
-			ϵ_Γ_4 = ϵ_Γ^4
-			no_inf_risk = (1.0 - inf_grid[age_i+1]) * (1.0 - inf_grid[age_i+2]) * (1.0 - inf_grid[age_i+3]) * (1.0 - inf_grid[age_i+4])
-			inf_risk = 1.0 - no_inf_risk
-			Threads.@threads for (f_i, ϵ_i, a_p_i) in ind_edu_EV
-				for ν_p_i in 1:ν_size, ϵ_p_i ∈ 1:ϵ_size
-					if f_i == 1
-						@inbounds EV_edu[a_p_i, ϵ_i, f_i] += no_inf_risk * ϵ_Γ_4[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, 1, ϵ_p_i, ν_p_i, 1, age_i+4]
-						@inbounds EV_edu[a_p_i, ϵ_i, f_i] += inf_risk * ϵ_Γ_4[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, 1, ϵ_p_i, ν_p_i, 2, age_i+4]
-					else
-						@inbounds EV_edu[a_p_i, ϵ_i, f_i] += ϵ_Γ_4[ϵ_i, ϵ_p_i] * ν_Γ[ν_p_i] * variables.V[a_p_i, 1, ϵ_p_i, ν_p_i, 2, age_i+4]
-					end
-				end
-			end
-
-			Threads.@threads for (f_i, ν_i, ϵ_i, a_i) in ind_edu
-				V_best = -10^16
-				best_a_p_i = 1
-				for a_p_i ∈ 1:a_size
-					a_p = a_grid[a_p_i]
-					r_kernel = (1.0 + r)^4.0 + (1.0 + r)^3.0 + (1.0 + r)^2.0 + (1.0 + r)
-					c = (-a_p - d_κ) / r_kernel
-					if c > 0.0
-						u_c = utility_function(c, 0.0, 0.0, γ, ψ, κ, q_bar)
-						@inbounds temp = u_c + β * u_c + (β^2.0) * u_c + (β^3.0) * u_c + (β^4.0) * EV_edu[a_p_i, ϵ_i, f_i]
-						if temp > V_best
-							V_best = temp
-							best_a_p_i = a_p_i
-						end
-					end
-				end
-				@inbounds variables.V[a_i, 1, ϵ_i, ν_i, f_i, age_i:(age_i+3)] .= V_best
-				@inbounds variables.policy_a_p[a_i, 1, ϵ_i, ν_i, f_i, age_i:(age_i+3)] .= best_a_p_i
-			end
-		end
-	end
-end
-
-function save_JLD_function!(variables::Mutable_Variables, parameters::NamedTuple; filename::String)
-	V = variables.V
-	policy_a_p = variables.policy_a_p
-	policy_x = variables.policy_x
-	policy_l = variables.policy_l
-	policy_K = variables.policy_K
-	@save filename parameters V policy_a_p policy_x policy_l policy_K
-	return nothing
-end#==============================##==============================#
-
+# function save_JLD_function!(variables::Mutable_Variables, parameters::NamedTuple; filename::String)
+# 	V = variables.V
+# 	policy_a_p = variables.policy_a_p
+# 	policy_x = variables.policy_x
+# 	policy_l = variables.policy_l
+# 	policy_K = variables.policy_K
+# 	@save filename parameters V policy_a_p policy_x policy_l policy_K
+# 	return nothing
+# end
 
 # solve stationary equilibrium #
 
-parameters = parameters_function(q_bar = 0.70)
+parameters = parameters_function()
 variables = variables_function(parameters)
 solve_value_and_policy_function!(variables, parameters)
 # save_JLD_function!(variables, parameters, filename = "workspace_benchmark.jld2")
@@ -2141,317 +1558,155 @@ savefig(plot_K_ν, string("plot_K_ν.pdf"))
 
 # simuation #
 
-function make_thread_rngs(seed::Int, num_threads::Int)
-    key = (UInt64(seed), UInt64(0))
-    return [Philox4x(UInt64, key) for _ in 1:num_threads]
+using Random
+using Random123
+using QuantEcon: Categorical
+using Polyester
+
+@inline function make_thread_rngs(; seed::UInt64 = UInt64(1124))
+    nt = Threads.nthreads()
+    key = (seed, UInt64(0))
+    return [Philox4x(UInt64, key) for _ in 1:nt]
 end
 
-@inline base_counter(h_id::UInt64, t_id::UInt64)::UInt64 = (h_id << 44) | (t_id << 24)
+@inline base_counter(h_id::UInt64, t_id::UInt64) = (h_id << 44) | (t_id << 24)
 
-struct SimulatedPanel{TF<:AbstractFloat,TI<:Integer}
-	a_state::Matrix{TI}
-	n_state::Matrix{TI}
-	max_n_state::Vector{TI}
-	ϵ_state::Matrix{TI}
-    ν_state::Matrix{TI}
-    inf_state::Matrix{TI}
-    ap_choice::Matrix{TI}
-    e_choice::Matrix{TI}
-    c_choice::Matrix{TI}
-    K_choice::Matrix{TI}
-end
-
-@inline advance_rng!(rng::Philox4x{UInt64}) = (rand(rng); true)
-
-@inline function newborn_bundle_draw(rng::Philox4x{UInt64},
-    e1_cat::Categorical, e2_cat::Categorical, e3_cat::Categorical)::NamedTuple
-    newborn_i = advance_rng!(rng)
-    e1_i = rand(rng, e1_cat)
-    e2_i = rand(rng, e2_cat)
-    e3_i = rand(rng, e3_cat)
-    nd_i = Float64(advance_rng!(rng))
-    good_history_i = advance_rng!(rng)
-    return (newborn=newborn_i, e1=e1_i, e2=e2_i, e3=e3_i, nd=nd_i, good_history=good_history_i)
-end
-
-@inline @inbounds function newborn_assignment!(cache::SimulItpCache, panel::SimulatedPanel, draw::NamedTuple, t_i::Int, h_i::Int, W::AbstractArray{Float64,3})
-    # @assert draw.newborn "Not newborn household"
-    panel.newborn[t_i, h_i] = draw.newborn
-    panel.age[t_i, h_i] = 1
-    panel.e1_state[t_i, h_i] = draw.e1
-    panel.e2_state[t_i, h_i] = draw.e2
-    panel.e3_state[t_i, h_i] = draw.e3
-    panel.earnings_state[t_i, h_i] = W[draw.e3, draw.e2, draw.e1]
-    panel.asset_state[t_i, h_i] = 0.0
-    panel.good_history[t_i, h_i] = draw.good_history
-    panel.default_choice[t_i, h_i] = !(draw.nd == 1.0)
-    asset_choice_itp = cache.policy_a_itp[draw.e3, draw.e2, draw.e1](0.0)
-    panel.asset_choice[t_i, h_i] = asset_choice_itp
-    discounted_price_itp = cache.q_itp[draw.e2, draw.e1](asset_choice_itp)
-    panel.discounted_price[t_i, h_i] = discounted_price_itp
-    panel.interest_rate[t_i, h_i] = 1.0 / discounted_price_itp - 1.0
-    panel.consumption[t_i, h_i] = panel.earnings_state[t_i, h_i] - discounted_price_itp * asset_choice_itp
-    return nothing
-end
-
-@inline function bundle_draw(rng::Philox4x{UInt64}, ρ::Float64, Ph::Float64,
-    e1_cat::Categorical, e1_Γ_cat_::Categorical, e2_cat::Categorical, e2_Γ_cat_::Categorical,
-    e3_cat::Categorical)::NamedTuple
-    newborn_i = rand(rng) > ρ
-    e1_i = newborn_i ? rand(rng, e1_cat) : rand(rng, e1_Γ_cat_)
-    e2_i = newborn_i ? rand(rng, e2_cat) : rand(rng, e2_Γ_cat_)
-    e3_i = rand(rng, e3_cat)
-    nd_i = newborn_i ? Float64(advance_rng!(rng)) : rand(rng)
-    good_history_i = newborn_i ? advance_rng!(rng) : rand(rng) <= Ph
-    return (newborn=newborn_i, e1=e1_i, e2=e2_i, e3=e3_i, nd=nd_i, good_history=good_history_i)
-end
-
-@inline @inbounds function assignment!(cache::SimulItpCache, panel::SimulatedPanel, draw::NamedTuple, t_i::Int, h_i::Int,
-    W::AbstractArray{Float64,3}, c_d::AbstractArray{Float64,3})
-    # @assert !draw.newborn "Unexpected newborn household"
-    panel.newborn[t_i, h_i] = false
-    panel.age[t_i, h_i] = panel.age[t_i-1, h_i] + 1
-    panel.e1_state[t_i, h_i] = draw.e1
-    panel.e2_state[t_i, h_i] = draw.e2
-    panel.e3_state[t_i, h_i] = draw.e3
-    panel.earnings_state[t_i, h_i] = W[draw.e3, draw.e2, draw.e1]
-    panel.asset_state[t_i, h_i] = panel.asset_choice[t_i-1, h_i]
-    # @assert !panel.good_history[t_i-1, h_i] & (panel.asset_state[t_i, h_i] >= 0.0) "Bad history HHs cannot borrow"
-    panel.good_history[t_i, h_i] = panel.good_history[t_i-1, h_i] | draw.good_history
-    if panel.good_history[t_i, h_i]
-        panel.default_choice[t_i, h_i] = cache.policy_d_itp[draw.e3, draw.e2, draw.e1](panel.asset_state[t_i, h_i]) ≥ draw.nd
-        if panel.default_choice[t_i, h_i]
-            panel.asset_choice[t_i, h_i] = 0.0
-            panel.good_history[t_i, h_i] = false
-            panel.consumption[t_i, h_i] = c_d[draw.e3, draw.e2, draw.e1]
-        else
-            asset_choice_itp = cache.policy_a_itp[draw.e3, draw.e2, draw.e1](panel.asset_state[t_i, h_i])
-            panel.asset_choice[t_i, h_i] = asset_choice_itp
-            discounted_price_itp = cache.q_itp[draw.e2, draw.e1](asset_choice_itp)
-            panel.discounted_price[t_i, h_i] = discounted_price_itp
-            panel.interest_rate[t_i, h_i] = 1.0 / discounted_price_itp - 1.0
-            panel.consumption[t_i, h_i] = panel.earnings_state[t_i, h_i] + panel.asset_state[t_i, h_i] - discounted_price_itp * asset_choice_itp
-        end
+@inline function ap_policy_to_index(
+    rng,
+    a_grid::AbstractVector{Float64},
+    ap::Float64,
+	a_size::Int
+)::Int
+    if ap ≤ a_grid[1]
+        return 1
+    elseif ap ≥ a_grid[end]
+        return a_size
     else
-        asset_choice_itp = cache.policy_a_pos_itp[draw.e3, draw.e2, draw.e1](panel.asset_state[t_i, h_i])
-        panel.asset_choice[t_i, h_i] = asset_choice_itp
-        discounted_price_itp = cache.q_itp[draw.e2, draw.e1](asset_choice_itp)
-        panel.discounted_price[t_i, h_i] = discounted_price_itp
-        panel.interest_rate[t_i, h_i] = 1.0 / discounted_price_itp - 1.0
-        panel.consumption[t_i, h_i] = panel.earnings_state[t_i, h_i] + panel.asset_state[t_i, h_i] - discounted_price_itp * asset_choice_itp
+        j  = searchsortedlast(a_grid, ap)
+        a0 = a_grid[j]
+        a1 = a_grid[j+1]
+        w  = (ap - a0) / (a1 - a0)
+        return (rand(rng) < w) ? (j + 1) : j
     end
-    return nothing
 end
 
-function initialize_panel(; num_households::Int64=80000, num_periods::Int64=80, IntT::Type{<:Integer}=Int64)
-
-    @assert 0 < num_households <= 2^20 "The number of households exceeds 20-bit capacity"
-    @assert 0 < num_periods <= 2^20 "The number of periods exceeds 20-bit capacity"
-
-    a_state = Matrix{IntT}(undef, num_periods, num_households)
-    n_state = Matrix{IntT}(undef, num_periods, num_households)
-    max_n_state = Matrix{IntT}(undef, num_periods, num_households)
-	ϵ_state = Matrix{IntT}(undef, num_periods, num_households)
-    ν_state = Matrix{IntT}(undef, num_periods, num_households)
-    inf_state = Matrix{IntT}(undef, num_periods, num_households)
-    ap_choice = Matrix{IntT}(undef, num_periods, num_households)
-    e_choice = Matrix{IntT}(undef, num_periods, num_households)
-    c_choice = Matrix{IntT}(undef, num_periods, num_households)
-    K_choice = Matrix{IntT}(undef, num_periods, num_households)
-
-    return SimulatedPanel{IntT}(
-        a_state, n_state, max_n_state, ϵ_state, ν_state, inf_state,
-        ap_choice, e_choice, c_choice, K_choice
-    )
+struct SimulatedPanel
+    a_state::Matrix{Int}
+    n_state::Matrix{Int}
+    ϵ_state::Matrix{Int}
+    ν_state::Matrix{Int}
+    f_state::Matrix{Int}
+    ap_choice::Matrix{Int}
+    c_choice::Matrix{Float64}
+    e_choice::Matrix{Float64}
+    K_choice::Matrix{Int8}
+    ΔK_choice::Matrix{Int8}
 end
 
-@inbounds function simulate_household_panel!(simul_panel::SimulatedPanel, simul_itp_cache::SimulItpCache, parameters::NamedTuple; seed::Int=1124)
+function initialize_panel(; num_households::Int, num_periods::Int)
+    T, N = num_periods, num_households
+    return SimulatedPanel(
+        zeros(Int, T, N),
+        zeros(Int, T, N),
+        zeros(Int, T, N),
+        zeros(Int, T, N),
+        zeros(Int, T, N),
+        zeros(Int, T, N),
+        zeros(Float64, T, N),
+        zeros(Float64, T, N),
+        zeros(Int8, T, N),
+        zeros(Int8, T, N),
+		)
+end
 
-    num_periods, num_households = size(simul_panel.newborn)
-    num_threads = Threads.nthreads()
-    rngs = make_thread_rngs(seed, num_threads)
+function simulate_household_panel!(
+    panel::SimulatedPanel,
+    variables::Mutable_Variables,
+    parameters::NamedTuple;
+    seed::UInt64 = UInt64(1124),
+)
+    @unpack a_grid, a_ind_zero, a_size, ϵ_size, n_size, n_Γ, ϵ_Γ, ϵ_G, ν_Γ, inf_grid, age_ret, age_inf, age_min = parameters
 
-    @unpack ϵ_G, ϵ_Γ, ϵ_size, ν_G, ν_Γ, ν_size, inf_grid = parameters
+    T, N = size(panel.a_state)
 
-    ϵ_cat = Categorical(ϵ_G)
-    ϵ_Γ_cat = [Categorical(ϵ_Γ[ϵ_i, :]) for ϵ_i in 1:ϵ_size]
-    e2_cat = Categorical(ν_G)
-    e2_Γ_cat = [Categorical(e2_Γ[e2_i, :]) for e2_i in 1:e2_size]
-    e3_cat = Categorical(e3_G)
+    ϵ_init = Categorical(ϵ_G)
+    ν_iid  = Categorical(ν_Γ)
+    ϵ_cat  = [Categorical(ϵ_Γ[i, :]) for i in 1:ϵ_size]
+    n_cat  = [Categorical(n_Γ[i, :]) for i in 1:n_size]
 
-    # @showprogress
-    prog_bar = Progress(num_households; dt=0.1, desc="Simulation progress:", barglyphs=BarGlyphs("[=> ]"))
-    Threads.@threads for h_i in 1:num_households
+    rngs = make_thread_rngs(seed = seed)
 
-        thread_id = Threads.threadid()
-        rng = rngs[thread_id]
-        h_id = UInt64(h_i)
-        h1_id = base_counter(h_id, UInt64(1))
-        set_counter!(rng, h1_id)
-        draw = newborn_bundle_draw(rng, e1_cat, e2_cat, e3_cat)
-        newborn_assignment!(simul_itp_cache, simul_panel, draw, 1, h_i, W)
+    @batch for h in 1:N
 
-        for t_i in 2:num_periods
+        rng = rngs[Threads.threadid()]
+        h_id = UInt64(h)
 
-            ht_id = base_counter(h_id, UInt64(t_i))
-            set_counter!(rng, ht_id)
-            e1_Γ_cat_ = e1_Γ_cat[simul_panel.e1_state[t_i-1, h_i]]
-            e2_Γ_cat_ = e2_Γ_cat[simul_panel.e2_state[t_i-1, h_i]]
-            draw = bundle_draw(rng, ρ, Ph, e1_cat, e1_Γ_cat_, e2_cat, e2_Γ_cat_, e3_cat)
+        set_counter!(rng, base_counter(h_id, UInt64(0)))
 
-            if draw.newborn
-                newborn_assignment!(simul_itp_cache, simul_panel, draw, t_i, h_i, W)
+        panel.a_state[1, h] = a_ind_zero
+        panel.n_state[1, h] = 1
+        panel.f_state[1, h] = 1
+        panel.ϵ_state[1, h] = rand(rng, ϵ_init)
+        panel.ν_state[1, h] = rand(rng, ν_iid)
+
+        @inbounds for t in 1:(T-1)
+
+			set_counter!(rng, base_counter(h_id, UInt64(t)))
+
+            a_i = panel.a_state[t, h]
+            n_i = panel.n_state[t, h]
+            ϵ_i = panel.ϵ_state[t, h]
+            ν_i = panel.ν_state[t, h]
+            f_i = panel.f_state[t, h]
+
+            c_raw  = variables.policy_c[a_i, n_i, ϵ_i, ν_i, f_i, t]
+            e_raw  = variables.policy_e[a_i, n_i, ϵ_i, ν_i, f_i, t]
+            panel.c_choice[t, h] = c_raw
+            panel.e_choice[t, h] = e_raw
+
+			K_raw  = variables.policy_K[a_i, n_i, ϵ_i, ν_i, f_i, t]
+			K01 = (K_raw >= 0.5) ? Int8(1) : Int8(0)
+            panel.K_choice[t, h] = K01
+
+			Δa_i = a_i != a_size ? a_i + 1 : a_size
+            ΔK_raw  = variables.policy_K[Δa_i, n_i, ϵ_i, ν_i, f_i, t]
+			ΔK01 = (ΔK_raw >= 0.5) ? Int8(1) : Int8(0)
+            panel.ΔK_choice[t, h] = ΔK01
+
+			ap_raw = variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, f_i, t]
+            ap_idx = ap_policy_to_index(rng, a_grid, ap_raw, a_size)
+            panel.ap_choice[t, h] = ap_idx
+            panel.a_state[t+1, h] = ap_idx
+
+			if t < age_ret - age_min
+				n_eff = min(n_size, n_i + Int(K_raw))
+				panel.n_state[t+1, h] = rand(rng, n_cat[n_eff])
+			else
+				panel.n_state[t+1, h] = 1
+			end
+
+			if t <= age_ret - age_min
+				panel.ϵ_state[t+1, h] = rand(rng, ϵ_cat[ϵ_i])
+				panel.ν_state[t+1, h] = rand(rng, ν_iid)
+			else
+				panel.ϵ_state[t+1, h] = ϵ_i
+				panel.ν_state[t+1, h] = ν_i
+			end
+
+            if (f_i == 1) && (t <= (age_inf - age_min))
+                panel.f_state[t+1, h] = (rand(rng) < inf_grid[t]) ? 2 : 1
             else
-                assignment!(simul_itp_cache, simul_panel, draw, t_i, h_i, W, c_d)
+                panel.f_state[t+1, h] = 2
             end
         end
-        next!(prog_bar)
     end
-    finish!(prog_bar)
-
     return nothing
 end
 
-function simulation_function(; num_hh::Int = 50000, filename::String)
-	"""
-	simulate variable panels for a given set of policy functions
-	"""
-	# load workspace
-	@load filename parameters V policy_a_p policy_x policy_l policy_K
-
-	# set seed
-	Random.seed!(1124)
-
-	# simulation periods
-	num_periods = parameters.age_size
-
-	# variable panels
-	panel_a = ones(Int, num_hh, num_periods)
-	panel_a_p = ones(Int, num_hh, num_periods)
-	panel_x = ones(num_hh, num_periods)
-	panel_l = ones(Int, num_hh, num_periods)
-	panel_n = ones(Int, num_hh, num_periods)
-	panel_K = ones(Int, num_hh, num_periods)
-	shock_ϵ = zeros(Int, num_hh, num_periods)
-	shock_ν = zeros(Int, num_hh, num_periods)
-	shock_f = zeros(Int, num_hh, num_periods)
-
-	# short-run fertility response
-	panel_ΔK = ones(Int, num_hh, num_periods)
-
-	# loop over HHs and Time periods
-	for period_i in 1:num_periods
-		println("Simulating period = $period_i")
-		Threads.@threads for hh_i in 1:num_hh
-			if period_i == 1
-
-				@inbounds begin
-					# initiate states
-					panel_a[hh_i, period_i] = 1
-					panel_n[hh_i, period_i] = 1
-					shock_ϵ[hh_i, period_i] = rand(Categorical(vec(parameters.ϵ_G)))
-					shock_ν[hh_i, period_i] = rand(Categorical(vec(parameters.ν_G)))
-					shock_f[hh_i, period_i] = rand(Categorical(vec([1.0 - parameters.inf_grid[period_i], parameters.inf_grid[period_i]])))
-
-					# actions
-					panel_a_p[hh_i, period_i] = policy_a_p[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-					panel_K[hh_i, period_i] = policy_K[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-					panel_ΔK[hh_i, period_i] =
-						policy_K[panel_a[hh_i, period_i] > parameters.a_size ? panel_a[hh_i, period_i] : panel_a[hh_i, period_i] + 1, panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-				end
-
-			elseif 1 < period_i < findall(parameters.age_grid .== (parameters.age_inf + 1))[]
-
-				@inbounds begin
-					# initiate states
-					panel_a[hh_i, period_i] = panel_a_p[hh_i, period_i-1]
-					panel_n[hh_i, period_i] = rand(Categorical(vec(parameters.n_Γ[(panel_n[hh_i, period_i-1]+panel_K[hh_i, period_i-1]-1), :])))
-					shock_ϵ[hh_i, period_i] = rand(Categorical(vec(parameters.ϵ_Γ[shock_ϵ[hh_i, period_i-1], :])))
-					shock_ν[hh_i, period_i] = rand(Categorical(vec(parameters.ν_Γ)))
-					shock_f[hh_i, period_i] = shock_f[hh_i, period_i-1] == 2 ? 2 : rand(Categorical(vec([1.0 - parameters.inf_grid[period_i], parameters.inf_grid[period_i]])))
-
-					# actions
-					panel_a_p[hh_i, period_i] = policy_a_p[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-					panel_x[hh_i, period_i] = policy_x[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-					panel_l[hh_i, period_i] = policy_l[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-					panel_K[hh_i, period_i] = policy_K[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-					panel_ΔK[hh_i, period_i] =
-						policy_K[panel_a[hh_i, period_i] > parameters.a_size ? panel_a[hh_i, period_i] : panel_a[hh_i, period_i] + 1, panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-				end
-
-			elseif findall(parameters.age_grid .== (parameters.age_inf + 1))[] <= period_i <= findall(parameters.age_grid .== parameters.age_ret)[]
-
-				@inbounds begin
-					# initiate states
-					panel_a[hh_i, period_i] = panel_a_p[hh_i, period_i-1]
-					panel_n[hh_i, period_i] = rand(Categorical(vec(parameters.n_Γ[(panel_n[hh_i, period_i-1]+panel_K[hh_i, period_i-1]-1), :])))
-					shock_ϵ[hh_i, period_i] = rand(Categorical(vec(parameters.ϵ_Γ[shock_ϵ[hh_i, period_i-1], :])))
-					shock_ν[hh_i, period_i] = rand(Categorical(vec(parameters.ν_Γ)))
-					shock_f[hh_i, period_i] = shock_f[hh_i, period_i-1] == 2 ? 2 : rand(Categorical(vec([1.0 - parameters.inf_grid[period_i], parameters.inf_grid[period_i]])))
-
-					# actions
-					panel_a_p[hh_i, period_i] = policy_a_p[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-					panel_x[hh_i, period_i] = policy_x[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-					panel_l[hh_i, period_i] = policy_l[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-					panel_K[hh_i, period_i] = policy_K[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-					panel_ΔK[hh_i, period_i] =
-						policy_K[panel_a[hh_i, period_i] > parameters.a_size ? panel_a[hh_i, period_i] : panel_a[hh_i, period_i] + 1, panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-				end
-
-			elseif findall(parameters.age_grid .== (parameters.age_ret))[] < period_i < parameters.age_size
-
-				@inbounds begin
-					# initiate states
-					panel_a[hh_i, period_i] = panel_a_p[hh_i, period_i-1]
-					panel_n[hh_i, period_i] = 1
-					shock_ϵ[hh_i, period_i] = shock_ϵ[hh_i, period_i-1]
-					shock_ν[hh_i, period_i] = shock_ν[hh_i, period_i-1]
-					shock_f[hh_i, period_i] = 2
-
-					# actions
-					panel_a_p[hh_i, period_i] = policy_a_p[panel_a[hh_i, period_i], panel_n[hh_i, period_i], shock_ϵ[hh_i, period_i], shock_ν[hh_i, period_i], shock_f[hh_i, period_i], period_i]
-				end
-
-			else
-
-				@inbounds begin
-					# initiate states
-					panel_a[hh_i, period_i] = panel_a_p[hh_i, period_i-1]
-					panel_n[hh_i, period_i] = 1
-					shock_ϵ[hh_i, period_i] = shock_ϵ[hh_i, period_i-1]
-					shock_ν[hh_i, period_i] = shock_ν[hh_i, period_i-1]
-					shock_f[hh_i, period_i] = 2
-
-					# actions
-					panel_a_p[hh_i, period_i] = parameters.a_ind_zero
-				end
-			end
-		end
-	end
-	return panel_a, panel_a_p, panel_x, panel_l, panel_n, panel_K, shock_ϵ, shock_ν, shock_f, panel_ΔK
-end
-
-num_hh = 200_000
-
-panel_a, panel_a_p, panel_x, panel_l, panel_n, panel_K, shock_ϵ, shock_ν, shock_f, panel_ΔK = simulation_function(num_hh = num_hh, filename = "workspace_benchmark.jld2")
-
-panel_a_lr_exp_1, panel_a_p_lr_exp_1, panel_x_lr_exp_1, panel_l_lr_exp_1, panel_n_lr_exp_1, panel_K_lr_exp_1, shock_ϵ_lr_exp_1, shock_ν_lr_exp_1, shock_f_lr_exp_1, panel_ΔK_lr_exp_1 =
-	simulation_function(num_hh = num_hh, filename = "workspace_lr_exp_1.jld2")
-
-panel_a_lr_exp_2, panel_a_p_lr_exp_2, panel_x_lr_exp_2, panel_l_lr_exp_2, panel_n_lr_exp_2, panel_K_lr_exp_2, shock_ϵ_lr_exp_2, shock_ν_lr_exp_2, shock_f_lr_exp_2, panel_ΔK_lr_exp_2 =
-	simulation_function(num_hh = num_hh, filename = "workspace_lr_exp_2.jld2")
-
-panel_a_lr_exp_3, panel_a_p_lr_exp_3, panel_x_lr_exp_3, panel_l_lr_exp_3, panel_n_lr_exp_3, panel_K_lr_exp_3, shock_ϵ_lr_exp_3, shock_ν_lr_exp_3, shock_f_lr_exp_3, panel_ΔK_lr_exp_3 =
-	simulation_function(num_hh = num_hh, filename = "workspace_lr_exp_3.jld2")
-
-panel_a_lr_exp_4, panel_a_p_lr_exp_4, panel_x_lr_exp_4, panel_l_lr_exp_4, panel_n_lr_exp_4, panel_K_lr_exp_4, shock_ϵ_lr_exp_4, shock_ν_lr_exp_4, shock_f_lr_exp_4, panel_ΔK_lr_exp_4 =
-	simulation_function(num_hh = num_hh, filename = "workspace_lr_exp_4.jld2")
-
-panel_a_lr_exp_5, panel_a_p_lr_exp_5, panel_x_lr_exp_5, panel_l_lr_exp_5, panel_n_lr_exp_5, panel_K_lr_exp_5, shock_ϵ_lr_exp_5, shock_ν_lr_exp_5, shock_f_lr_exp_5, panel_ΔK_lr_exp_5 =
-	simulation_function(num_hh = num_hh, filename = "workspace_lr_exp_5.jld2")
-
-panel_a_lr_exp_6, panel_a_p_lr_exp_6, panel_x_lr_exp_6, panel_l_lr_exp_6, panel_n_lr_exp_6, panel_K_lr_exp_6, shock_ϵ_lr_exp_6, shock_ν_lr_exp_6, shock_f_lr_exp_6, panel_ΔK_lr_exp_6 =
-	simulation_function(num_hh = num_hh, filename = "workspace_lr_exp_6.jld2")#====================##====================##====================##====================#
+T = parameters.age_size
+N = 300_000
+panel = initialize_panel(num_households=N, num_periods=T)
+simulate_household_panel!(panel, variables, parameters; seed=UInt64(20260118))
 
 # panel_a_low_inf, panel_a_p_low_inf, panel_x_low_inf, panel_l_low_inf, panel_n_low_inf, panel_K_low_inf, shock_ϵ_low_inf, shock_ν_low_inf, shock_f_low_inf = simulation_function(num_hh = num_hh, filename = "workspace_low_inf.jld2")
 
@@ -2708,6 +1963,92 @@ panel_a_lr_exp_6, panel_a_p_lr_exp_6, panel_x_lr_exp_6, panel_l_lr_exp_6, panel_
 
 
 # Short-Run Response #
+
+using DataFrames
+using CategoricalArrays
+using FixedEffectModels
+using Plots
+
+function _term_group_index(term::AbstractString, levels::Vector{String})
+    for (k, lev) in pairs(levels)
+        occursin(lev, term) && return k
+    end
+    return missing
+end
+
+function short_run_regression(panel::SimulatedPanel, parameters; savepath::String="plot_short_run.pdf")
+
+    @unpack a_size, a_grid, age_grid = parameters
+
+    panel_K  = permutedims(Float64.(panel.K_choice))
+    panel_dK = permutedims(Float64.(panel.ΔK_choice)) .- panel_K
+    panel_a  = permutedims(panel.a_state)
+    panel_a_adj = clamp.(panel_a, 1, a_size-1)
+    panel_da = a_grid[panel_a_adj .+ 1] .- a_grid[panel_a_adj]
+
+    I, J = size(panel_dK)
+
+    df = DataFrame(
+        i   = repeat(1:I, J),
+        age = repeat(age_grid, inner=I),
+        dK  = vec(panel_dK),
+        ai  = vec(panel_a),
+        da  = vec(panel_da),
+    )
+
+    df = df[df.ai .!= a_size, :]
+
+    df.age_group = map(df.age) do j
+        if 15 <= j <= 19
+            "15-19"
+        elseif 20 <= j <= 24
+            "20-24"
+        elseif 25 <= j <= 29
+            "25-29"
+        elseif 30 <= j <= 34
+            "30-34"
+        elseif 35 <= j <= 39
+            "35-39"
+        elseif 40 <= j <= 44
+            "40-44"
+        elseif 45 <= j <= 49
+            "45-49"
+        else
+            missing
+        end
+    end
+    dropmissing!(df, [:age_group])
+
+    levels = ["15-19", "20-24", "25-29", "30-34", "35-39", "40-44", "45-49"]
+    df.age_group = CategoricalArray(df.age_group; ordered=true, levels=levels)
+
+    m = reg(df, @formula(dK ~ 0 + age_group + da & age_group), Vcov.cluster(:i))
+    println(m)
+
+    out = DataFrame(term = coefnames(m), b = coef(m), se = stderror(m))
+
+    alpha = out[contains.(out.term, "da") .&& contains.(out.term, "age_group"), :]
+    alpha.grp = [_term_group_index(t, levels) for t in alpha.term]
+    dropmissing!(alpha, [:grp])
+    sort!(alpha, :grp)
+
+    # plot
+    x = 1:nrow(alpha)
+    y = alpha.b
+    yerr = 1.96 .* alpha.se
+    plot_sr = plot(
+        x, y;
+        yerror = yerr,
+        xlabel = "Age group",
+        ylabel = "α_J",
+        xticks = (x, levels[alpha.grp]),
+        legend = false,
+    )
+    savefig(plot_sr, savepath)
+
+    return (m=m, out=out, alpha=alpha, df=df, plot=plot_sr)
+end
+
 
 using DataFrames
 using CategoricalArrays
