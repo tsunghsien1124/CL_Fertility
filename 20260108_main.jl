@@ -188,7 +188,7 @@ function parameters_function(;
 	ν_size::Integer = 5,              # number of transitory shock
 	a_max::Real = 120,                # max of asset holding
 	a_size_neg::Integer = 11,         # number of negative asset
-	a_size::Integer = 100,            # number of asset
+	a_size::Integer = 50,             # number of asset
 	a_degree::Integer = 2,            # curvature of asset gridpoints
 	q_x::Real = 1.0, #=================##=================#                  # price of monetary input $x$
 
@@ -1338,22 +1338,24 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
 	return nothing
 end
 
-# function save_JLD_function!(variables::Mutable_Variables, parameters::NamedTuple; filename::String)
-# 	V = variables.V
-# 	policy_a_p = variables.policy_a_p
-# 	policy_x = variables.policy_x
-# 	policy_l = variables.policy_l
-# 	policy_K = variables.policy_K
-# 	@save filename parameters V policy_a_p policy_x policy_l policy_K
-# 	return nothing
-# end
+function save_JLD_function!(variables::Mutable_Variables, parameters::NamedTuple; filename::String)
+	V = variables.V
+	policy_a_p = variables.policy_a_p
+	# policy_x = variables.policy_x
+	# policy_l = variables.policy_l
+	policy_c = variables.policy_c
+	policy_e = variables.policy_e
+	policy_K = variables.policy_K
+	@save filename parameters V policy_a_p policy_c policy_e policy_K
+	return nothing
+end
 
 # solve stationary equilibrium #
 
 parameters = parameters_function()
 variables = variables_function(parameters)
 solve_value_and_policy_function!(variables, parameters)
-# save_JLD_function!(variables, parameters, filename = "workspace_benchmark.jld2")
+save_JLD_function!(variables, parameters, filename = "workspace_benchmark_new.jld2")
 
 # parameters_lr_exp_1 = parameters_function(lr_exp = 1)
 # variables_lr_exp_1 = variables_function(parameters_lr_exp_1)
