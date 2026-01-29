@@ -502,7 +502,7 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
                 # @inbounds variables.V[a_i, 1, ϵ_i, ν_i, 2, age_i] = utility_function((1.0 + r) * a + w_bar, 0.0, 0.0, γ, ψ, κ, q_bar)
                 @inbounds variables.V[a_i, 1, ϵ_i, ν_i, 2, age_i] = utility_function(c_a[a_i, 1] + w_bar, 0.0, 0.0, γ, ψ, κ, q_bar)
             end
-        elseif age_ret < age < age_max # after retirement
+        elseif age_ret <= age < age_max # after retirement
             Threads.@threads for (ν_i, ϵ_i, a_i) in ind_max_ret
                 ν = ν_grid[ν_i]
                 ϵ = ϵ_grid[ϵ_i]
@@ -525,7 +525,7 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
                 @inbounds variables.V[a_i, 1, ϵ_i, ν_i, 2, age_i] = V_best
                 @inbounds variables.policy_a_p[a_i, 1, ϵ_i, ν_i, 2, age_i] = best_a_p_i
             end
-        elseif age == age_ret # at retirement age
+        elseif age == (age_ret - 1) # at retirement age
             Threads.@threads for (ν_i, ϵ_i, n_i, a_i) in ind_ret_inf
                 ν = ν_grid[ν_i]
                 ϵ = ϵ_grid[ϵ_i]
@@ -577,7 +577,7 @@ function solve_value_and_policy_function!(variables::Mutable_Variables, paramete
                     @inbounds variables.policy_l[a_i, n_i, ϵ_i, ν_i, 2, age_i] = best_l_i
                 end
             end
-        elseif age_inf < age < age_ret # berween infertile age and retirement age
+        elseif age_inf < age < (age_ret - 1) # berween infertile age and retirement age
             @inbounds EV .= 0.0
             Threads.@threads for (ϵ_i, n_i, a_p_i) in ind_ret_inf_EV
                 for ν_p_i in 1:ν_size, ϵ_p_i = 1:ϵ_size, n_p_i = 1:n_size
