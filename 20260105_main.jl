@@ -1636,15 +1636,26 @@ save_JLD_function!(variables_lr_exp_6, parameters_lr_exp_6, filename = "workspac
 # solve_value_and_policy_function!(variables_no_inf, parameters_no_inf)
 # save_JLD_function!(variables_no_inf, parameters_no_inf, filename = "workspace_no_inf.jld2")
 
-# parameters_edu_h = parameters_function(edu_h_ind=1.0, edu_h_scale=1.25, edu_σ_ϵ_scale=3.00, edu_σ_ν_scale=3.00)
-# variables_edu_h = variables_function(parameters_edu_h)
-# solve_value_and_policy_edu_function!(variables_edu_h, parameters_edu_h)
-# save_JLD_function!(variables_edu_h, parameters_edu_h, filename = "workspace_edu_h.jld2")
+parameters_edu_h = parameters_function(edu_h_ind=1.0, edu_h_scale=1.25, edu_σ_ϵ_scale=3.00, edu_σ_ν_scale=3.00)
+variables_edu_h = variables_function(parameters_edu_h)
+solve_value_and_policy_edu_function!(variables_edu_h, parameters_edu_h)
+save_JLD_function!(variables_edu_h, parameters_edu_h, filename = "workspace_edu_h.jld2")
 
-# parameters_edu_h_low_σ = parameters_function(edu_h_ind=1.0, edu_h_scale=1.25, edu_σ_ϵ_scale=1.00, edu_σ_ν_scale=1.00)
-# variables_edu_h_low_σ = variables_function(parameters_edu_h_low_σ)
-# solve_value_and_policy_edu_function!(variables_edu_h_low_σ, parameters_edu_h_low_σ)
-# save_JLD_function!(variables_edu_h_low_σ, parameters_edu_h_low_σ, filename = "workspace_edu_h_low_σ.jld2")
+parameters_edu_h_low_σ = parameters_function(edu_h_ind=1.0, edu_h_scale=1.25, edu_σ_ϵ_scale=1.00, edu_σ_ν_scale=1.00)
+variables_edu_h_low_σ = variables_function(parameters_edu_h_low_σ)
+solve_value_and_policy_edu_function!(variables_edu_h_low_σ, parameters_edu_h_low_σ)
+save_JLD_function!(variables_edu_h_low_σ, parameters_edu_h_low_σ, filename = "workspace_edu_h_low_σ.jld2")
+
+parameters_edu_h_low_σ_1 = parameters_function(edu_h_ind=1.0, edu_h_scale=1.10, edu_σ_ϵ_scale=1.00, edu_σ_ν_scale=1.00)
+variables_edu_h_low_σ_1 = variables_function(parameters_edu_h_low_σ_1)
+solve_value_and_policy_edu_function!(variables_edu_h_low_σ_1, parameters_edu_h_low_σ_1)
+save_JLD_function!(variables_edu_h_low_σ_1, parameters_edu_h_low_σ_1, filename = "workspace_edu_h_low_σ_1.jld2")
+
+parameters_edu_h_low_σ_2 = parameters_function(edu_h_ind=1.0, edu_h_scale=1.40, edu_σ_ϵ_scale=1.00, edu_σ_ν_scale=1.00)
+variables_edu_h_low_σ_2 = variables_function(parameters_edu_h_low_σ_2)
+solve_value_and_policy_edu_function!(variables_edu_h_low_σ_2, parameters_edu_h_low_σ_2)
+save_JLD_function!(variables_edu_h_low_σ_2, parameters_edu_h_low_σ_2, filename = "workspace_edu_h_low_σ_2.jld2")
+
 
 #===========#
 # simuation #
@@ -1785,80 +1796,84 @@ panel_a_lr_exp_6, panel_a_p_lr_exp_6, panel_x_lr_exp_6, panel_l_lr_exp_6, panel_
 
 # panel_a_no_inf, panel_a_p_no_inf, panel_x_no_inf, panel_l_no_inf, panel_n_no_inf, panel_K_no_inf, shock_ϵ_no_inf, shock_ν_no_inf, shock_f_no_inf = simulation_function(num_hh = num_hh, filename = "workspace_no_inf.jld2")
 
-# panel_a_edu_h, panel_a_p_edu_h, panel_x_edu_h, panel_l_edu_h, panel_n_edu_h, panel_K_edu_h, shock_ϵ_edu_h, shock_ν_edu_h, shock_f_edu_h = simulation_function(num_hh = num_hh, filename = "workspace_edu_h.jld2")
+panel_a_edu_h, panel_a_p_edu_h, panel_x_edu_h, panel_l_edu_h, panel_n_edu_h, panel_K_edu_h, shock_ϵ_edu_h, shock_ν_edu_h, shock_f_edu_h = simulation_function(num_hh = num_hh, filename = "workspace_edu_h.jld2")
 
-# panel_a_edu_h_low_σ, panel_a_p_edu_h_low_σ, panel_x_edu_h_low_σ, panel_l_edu_h_low_σ, panel_n_edu_h_low_σ, panel_K_edu_h_low_σ, shock_ϵ_edu_h_low_σ, shock_ν_edu_h_low_σ, shock_f_edu_h_low_σ = simulation_function(num_hh = num_hh, filename = "workspace_edu_h_low_σ.jld2")
+panel_a_edu_h_low_σ, panel_a_p_edu_h_low_σ, panel_x_edu_h_low_σ, panel_l_edu_h_low_σ, panel_n_edu_h_low_σ, panel_K_edu_h_low_σ, shock_ϵ_edu_h_low_σ, shock_ν_edu_h_low_σ, shock_f_edu_h_low_σ = simulation_function(num_hh = num_hh, filename = "workspace_edu_h_low_σ.jld2")
+
+panel_a_edu_h_low_σ_1, panel_a_p_edu_h_low_σ_1, panel_x_edu_h_low_σ_1, panel_l_edu_h_low_σ_1, panel_n_edu_h_low_σ_1, panel_K_edu_h_low_σ_1, shock_ϵ_edu_h_low_σ_1, shock_ν_edu_h_low_σ_1, shock_f_edu_h_low_σ_1 = simulation_function(num_hh = num_hh, filename = "workspace_edu_h_low_σ_1.jld2")
+
+panel_a_edu_h_low_σ_2, panel_a_p_edu_h_low_σ_2, panel_x_edu_h_low_σ_2, panel_l_edu_h_low_σ_2, panel_n_edu_h_low_σ_2, panel_K_edu_h_low_σ_2, shock_ϵ_edu_h_low_σ_2, shock_ν_edu_h_low_σ_2, shock_f_edu_h_low_σ_2 = simulation_function(num_hh = num_hh, filename = "workspace_edu_h_low_σ_2.jld2")
 
 #====================#
 # simulation results #
 #====================#
-# plot_h_edu_mixed = plot(
-#     box=:on,
-#     size=[800, 600],
-#     xlim=[18, 62],
-#     xticks=18:4:62,
-#     ylim=[-0.2, 4.2],
-#     xtickfont=font(16, "Computer Modern", :black),
-#     ytickfont=font(16, "Computer Modern", :black),
-#     legendfont=font(16, "Computer Modern", :black),
-#     guidefont=font(18, "Computer Modern", :black),
-#     titlefont=font(18, "Computer Modern", :black),
-#     margin=4mm,
-#     xlabel="Age",
-#     ylabel="Unit Wage"
-# )
-# plot_h_edu_mixed = plot!(
-#     parameters.age_min:parameters.age_ret,
-#     parameters.h_grid[1:(parameters.age_ret-parameters.age_min+1)],
-#     label="Benchmark",
-#     lw=3,
-#     lc=:blue
-# )
-# plot_h_edu_mixed = plot!(
-#     parameters.age_min:parameters.age_ret,
-#     vcat(zeros(4), parameters_edu_h.h_grid[5:(parameters.age_ret-parameters.age_min+1)]),
-#     label="Education",
-#     lw=3,
-#     lc=:red,
-#     ls=:dashdot
-# )
-# savefig(plot_h_edu_mixed, string("plot_h_edu_mixed.pdf"))
+plot_h_edu_mixed = plot(
+    box=:on,
+    size=[800, 600],
+    xlim=[18, 62],
+    xticks=18:4:62,
+    ylim=[-0.2, 4.2],
+    xtickfont=font(16, "Computer Modern", :black),
+    ytickfont=font(16, "Computer Modern", :black),
+    legendfont=font(16, "Computer Modern", :black),
+    guidefont=font(18, "Computer Modern", :black),
+    titlefont=font(18, "Computer Modern", :black),
+    margin=4mm,
+    xlabel="Age",
+    ylabel="Unit Wage"
+)
+plot_h_edu_mixed = plot!(
+    parameters.age_min:parameters.age_ret,
+    parameters.h_grid[1:(parameters.age_ret-parameters.age_min+1)],
+    label="Non-College",
+    lw=3,
+    lc=:blue
+)
+plot_h_edu_mixed = plot!(
+    parameters.age_min:parameters.age_ret,
+    vcat(zeros(4), parameters_edu_h.h_grid[5:(parameters.age_ret-parameters.age_min+1)]),
+    label="College",
+    lw=3,
+    lc=:red,
+    ls=:dashdot
+)
+savefig(plot_h_edu_mixed, string("plot_h_edu_mixed.pdf"))
 
-# # should be average complete fertility rate, not conception right?
-# avg_conception_rate = zeros(parameters.age_size)
+# should be average complete fertility rate, not conception right?
+avg_conception_rate = zeros(parameters.age_size)
 # avg_conception_rate_low_inf = zeros(parameters.age_size)
 # avg_conception_rate_no_inf = zeros(parameters.age_size)
-# avg_conception_rate_edu_h = zeros(parameters.age_size)
-# avg_conception_rate_edu_h_low_σ = zeros(parameters.age_size)
-# Threads.@threads for t = 1:parameters.age_size
-#     avg_conception_rate[t] = sum(panel_K[:, t] .- 1) / (num_hh / 1000)
-#     avg_conception_rate_low_inf[t] = sum(panel_K_low_inf[:, t] .- 1) / (num_hh / 1000)
-#     avg_conception_rate_no_inf[t] = sum(panel_K_no_inf[:, t] .- 1) / (num_hh / 1000)
-#     avg_conception_rate_edu_h[t] = sum(panel_K_edu_h[:, t] .- 1) / (num_hh / 1000)
-#     avg_conception_rate_edu_h_low_σ[t] = sum(panel_K_edu_h_low_σ[:, t] .- 1) / (num_hh / 1000)
-# end
-# plot_conception_dist_by_age_mixed = plot(
-#     box=:on,
-#     size=[800, 600],
-#     xlim=[18, 45],
-#     xticks=18:3:45,
-#     # ylim=[-5, 60],
-#     xtickfont=font(16, "Computer Modern", :black),
-#     ytickfont=font(16, "Computer Modern", :black),
-#     legendfont=font(16, "Computer Modern", :black),
-#     guidefont=font(18, "Computer Modern", :black),
-#     titlefont=font(18, "Computer Modern", :black),
-#     margin=4mm,
-#     xlabel="Age",
-#     ylabel="Avg Conception Rate"
-# )
-# plot_conception_dist_by_age_mixed = plot!(
-#     parameters.age_min:parameters.age_inf,
-#     avg_conception_rate[1:(parameters.age_inf-parameters.age_min+1)],
-#     label="Benchmark",
-#     lw=3,
-#     lc=:blue
-# )
+avg_conception_rate_edu_h = zeros(parameters.age_size)
+avg_conception_rate_edu_h_low_σ = zeros(parameters.age_size)
+Threads.@threads for t = 1:parameters.age_size
+    avg_conception_rate[t] = sum(panel_K[:, t] .- 1) / (num_hh / 1000)
+    # avg_conception_rate_low_inf[t] = sum(panel_K_low_inf[:, t] .- 1) / (num_hh / 1000)
+    # avg_conception_rate_no_inf[t] = sum(panel_K_no_inf[:, t] .- 1) / (num_hh / 1000)
+    avg_conception_rate_edu_h[t] = sum(panel_K_edu_h[:, t] .- 1) / (num_hh / 1000)
+    avg_conception_rate_edu_h_low_σ[t] = sum(panel_K_edu_h_low_σ[:, t] .- 1) / (num_hh / 1000)
+end
+plot_conception_dist_by_age_mixed = plot(
+    box=:on,
+    size=[800, 600],
+    xlim=[18, 45],
+    xticks=18:3:45,
+    # ylim=[-5, 60],
+    xtickfont=font(16, "Computer Modern", :black),
+    ytickfont=font(16, "Computer Modern", :black),
+    legendfont=font(16, "Computer Modern", :black),
+    guidefont=font(18, "Computer Modern", :black),
+    titlefont=font(18, "Computer Modern", :black),
+    margin=4mm,
+    xlabel="Age",
+    ylabel="Avg Conception Rate"
+)
+plot_conception_dist_by_age_mixed = plot!(
+    parameters.age_min:parameters.age_inf,
+    avg_conception_rate[1:(parameters.age_inf-parameters.age_min+1)],
+    label="Non-College",
+    lw=3,
+    lc=:blue
+)
 # plot_conception_dist_by_age_mixed = plot!(
 #     parameters.age_min:parameters.age_inf,
 #     avg_conception_rate_low_inf[1:(parameters.age_inf-parameters.age_min+1)],
@@ -1875,15 +1890,65 @@ panel_a_lr_exp_6, panel_a_p_lr_exp_6, panel_x_lr_exp_6, panel_l_lr_exp_6, panel_
 #     lc=:green,
 #     ls=:dot
 # )
-# plot_conception_dist_by_age_mixed = plot!(
-#     parameters.age_min:parameters.age_inf,
-#     avg_conception_rate_edu_h_low_σ[1:(parameters.age_inf-parameters.age_min+1)],
-#     label="Education",
-#     lw=3,
-#     lc=:red,
-#     ls=:dashdot
-# )
-# savefig(plot_conception_dist_by_age_mixed, string("plot_conception_dist_by_age_mixed.pdf"))
+plot_conception_dist_by_age_mixed = plot!(
+    parameters.age_min:parameters.age_inf,
+    avg_conception_rate_edu_h_low_σ[1:(parameters.age_inf-parameters.age_min+1)],
+    label="College",
+    lw=3,
+    lc=:red,
+    ls=:dashdot
+)
+savefig(plot_conception_dist_by_age_mixed, string("plot_conception_dist_by_age_mixed.pdf"))
+
+
+# should be average complete fertility rate, not conception right?
+avg_conception_rate_edu_h_low_σ = zeros(parameters.age_size)
+avg_conception_rate_edu_h_low_σ_1 = zeros(parameters.age_size)
+avg_conception_rate_edu_h_low_σ_2 = zeros(parameters.age_size)
+Threads.@threads for t = 1:parameters.age_size
+    avg_conception_rate_edu_h_low_σ[t] = sum(panel_K_edu_h_low_σ[:, t] .- 1) / (num_hh / 1000)
+    avg_conception_rate_edu_h_low_σ_1[t] = sum(panel_K_edu_h_low_σ_1[:, t] .- 1) / (num_hh / 1000)
+    avg_conception_rate_edu_h_low_σ_2[t] = sum(panel_K_edu_h_low_σ_2[:, t] .- 1) / (num_hh / 1000)
+end
+plot_conception_dist_by_age_mixed = plot(
+    box=:on,
+    size=[800, 600],
+    xlim=[18, 45],
+    xticks=18:3:45,
+    # ylim=[-5, 60],
+    xtickfont=font(16, "Computer Modern", :black),
+    ytickfont=font(16, "Computer Modern", :black),
+    legendfont=font(16, "Computer Modern", :black),
+    guidefont=font(18, "Computer Modern", :black),
+    titlefont=font(18, "Computer Modern", :black),
+    margin=4mm,
+    xlabel="Age",
+    ylabel="Avg Conception Rate"
+)
+plot_conception_dist_by_age_mixed = plot!(
+    parameters.age_min:parameters.age_inf,
+    avg_conception_rate_edu_h_low_σ_1[1:(parameters.age_inf-parameters.age_min+1)],
+    label="10%",
+    lw=3,
+    lc=:blue,
+)
+plot_conception_dist_by_age_mixed = plot!(
+    parameters.age_min:parameters.age_inf,
+    avg_conception_rate_edu_h_low_σ[1:(parameters.age_inf-parameters.age_min+1)],
+    label="25%",
+    lw=3,
+    lc=:red,
+    ls=:dashdot
+)
+plot_conception_dist_by_age_mixed = plot!(
+    parameters.age_min:parameters.age_inf,
+    avg_conception_rate_edu_h_low_σ_2[1:(parameters.age_inf-parameters.age_min+1)],
+    label="40%",
+    lw=3,
+    lc=:black,
+    ls=:dot
+)
+savefig(plot_conception_dist_by_age_mixed, string("plot_conception_dist_by_age_mixed_pre.pdf"))
 
 # # infertility risk
 # plot_inf_risk_mixed = plot(
@@ -2087,7 +2152,7 @@ alpha = out[contains.(out.term, "da") .&& contains.(out.term, "age_group"), :]
 x = 1:nrow(alpha)
 y = alpha.b
 yerr = 1.96 .* alpha.se
-age_group = ["15-19","20-24","25-29","30-34","35-39","40-44","45-50"]
+age_group = ["18-19","20-24","25-29","30-34","35-39","40-44","45-49"]
 plot_sr = plot(
     x, y,
     # seriestype = :scatter,
@@ -2100,16 +2165,58 @@ plot_sr = plot(
 )
 savefig(plot_sr, string("plot_short_run.pdf"))
 
+plot_sr = plot(
+    box = :on,
+    size = (800, 600),
+    xticks = (x, age_group),
+    xtickfont = font(16, "Computer Modern", :black),
+    ytickfont = font(16, "Computer Modern", :black),
+    legendfont = font(16, "Computer Modern", :black),
+    guidefont = font(18, "Computer Modern", :black),
+    titlefont = font(18, "Computer Modern", :black),
+    margin = 4mm,
+    xlabel = "Age group",
+    ylabel = "α_J",
+    legend = false,
+)
+plot!(plot_sr,
+    x, y;
+    yerror = yerr,
+    seriestype = :scatter,
+    ms = 5,
+    lw = 3,
+    lc=:blue
+)
+plot!(plot_sr, x, y; lw = 3, lc=:blue)
+savefig(plot_sr, string("plot_short_run.pdf"))
+
+
 #===================#
 # Long-Run Response #
 #===================#
-plot_lr_h = plot(parameters.age_grid, parameters.h_grid, labels="Benchmark", legend=:bottomright)
-plot_lr_h = plot!(parameters_lr_exp_1.age_grid, parameters_lr_exp_1.h_grid, labels="20-24")
-plot_lr_h = plot!(parameters_lr_exp_2.age_grid, parameters_lr_exp_2.h_grid, labels="25-29")
-plot_lr_h = plot!(parameters_lr_exp_3.age_grid, parameters_lr_exp_3.h_grid, labels="30-34")
-plot_lr_h = plot!(parameters_lr_exp_4.age_grid, parameters_lr_exp_4.h_grid, labels="35-39")
-plot_lr_h = plot!(parameters_lr_exp_5.age_grid, parameters_lr_exp_5.h_grid, labels="40-44")
-plot_lr_h = plot!(parameters_lr_exp_6.age_grid, parameters_lr_exp_6.h_grid, labels="45-49")
+
+plot_lr_h = plot(
+    box = :on,
+    size = (800, 600),
+    xlim=[18, 55],
+    xticks=18:3:55,
+    xtickfont = font(16, "Computer Modern", :black),
+    ytickfont = font(16, "Computer Modern", :black),
+    legendfont = font(16, "Computer Modern", :black),
+    guidefont = font(18, "Computer Modern", :black),
+    titlefont = font(18, "Computer Modern", :black),
+    margin = 4mm,
+    xlabel = "Age",
+    ylabel = "Life-Cycle Wage",
+    legend = false,
+)
+plot_lr_h = plot!(parameters.age_grid, parameters.h_grid, labels="Benchmark", legend=:bottomright, lw=3)
+plot_lr_h = plot!(parameters_lr_exp_1.age_grid, parameters_lr_exp_1.h_grid, labels="20-24", lw=3)
+plot_lr_h = plot!(parameters_lr_exp_2.age_grid, parameters_lr_exp_2.h_grid, labels="25-29", lw=3)
+plot_lr_h = plot!(parameters_lr_exp_3.age_grid, parameters_lr_exp_3.h_grid, labels="30-34", lw=3)
+plot_lr_h = plot!(parameters_lr_exp_4.age_grid, parameters_lr_exp_4.h_grid, labels="35-39", lw=3)
+plot_lr_h = plot!(parameters_lr_exp_5.age_grid, parameters_lr_exp_5.h_grid, labels="40-44", lw=3)
+plot_lr_h = plot!(parameters_lr_exp_6.age_grid, parameters_lr_exp_6.h_grid, labels="45-49", lw=3)
 savefig(plot_lr_h, string("plot_long_run_h.pdf"))
 
 using DataFrames
@@ -2158,4 +2265,29 @@ plot_lr = plot(
     legend = false,
     # xrotation = 45,
 )
+savefig(plot_lr, string("plot_long_run.pdf"))
+
+plot_lr = plot(
+    box = :on,
+    size = (800, 600),
+    xticks = (x, age_group_lr),
+    xtickfont = font(16, "Computer Modern", :black),
+    ytickfont = font(16, "Computer Modern", :black),
+    legendfont = font(16, "Computer Modern", :black),
+    guidefont = font(18, "Computer Modern", :black),
+    titlefont = font(18, "Computer Modern", :black),
+    margin = 4mm,
+    xlabel = "Age group",
+    ylabel = "β_J",
+    legend = false,
+)
+plot!(plot_lr,
+    x, y;
+    yerror = yerr,
+    seriestype = :scatter,
+    ms = 5,
+    lw = 3,
+    lc=:blue
+)
+plot!(plot_lr, x, y; lw = 3, lc=:blue)
 savefig(plot_lr, string("plot_long_run.pdf"))
