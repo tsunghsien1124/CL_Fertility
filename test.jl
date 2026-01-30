@@ -20,11 +20,11 @@ plot(old["parameters"].a_grid, old["V"][:,n_ind,ϵ_ind,ν_ind,inf_ind,age_ret_in
 plot!(new["parameters"].a_grid, new["V"][:,n_ind,ϵ_ind,ν_ind,inf_ind,age_ret_ind], label="new")
 
 n_ind = 2
-ϵ_ind = 3
+ϵ_ind = 4
 ν_ind = 3
 inf_ind = 2
 # age_inf_ind = old["parameters"].age_inf - old["parameters"].age_min + 1
-age_inf_ind = old["parameters"].age_ret - old["parameters"].age_min - 1
+age_inf_ind = old["parameters"].age_ret - old["parameters"].age_min
 
 plot(old["parameters"].a_grid, old["parameters"].a_grid[old["policy_a_p"][:,n_ind,ϵ_ind,ν_ind,inf_ind,age_inf_ind]], label="old")
 plot!(new["parameters"].a_grid, new["policy_a_p"][:,n_ind,ϵ_ind,ν_ind,inf_ind,age_inf_ind], label="new")
@@ -36,7 +36,7 @@ w_old = exp(old["parameters"].ϵ_grid[ϵ_ind] + old["parameters"].ν_grid[ν_ind
 w_new = exp(new["parameters"].ϵ_grid[ϵ_ind] + new["parameters"].ν_grid[ν_ind] + new["parameters"].h_grid[age_inf_ind])
 @assert w_old == w_new
 
-a_ind = old["parameters"].a_size -1 
+a_ind = 22 # old["parameters"].a_size -1 
 a_old = old["parameters"].a_grid[a_ind]
 a_p_old = old["parameters"].a_grid[old["policy_a_p"][a_ind,n_ind,ϵ_ind,ν_ind,inf_ind,age_inf_ind]]
 x_old = old["parameters"].x_grid[old["policy_x"][a_ind,n_ind,ϵ_ind,ν_ind,inf_ind,age_inf_ind]]

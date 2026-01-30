@@ -689,22 +689,21 @@ function retired_step!(
 	ibind = searchsortedlast(a_grid, a_endo_v[1])
 
 	if ibind > 0
-		has_amin = (ap_endo_v[1] == a_min)
-
+		Vp_amin = V_next_a[1]
+	
 		@inbounds for a_i in 1:ibind
 			aR = aR_grid[a_i]
 			ap = a_min
 			c  = aR + w_bar - ap
-
-			if !isfinite(c) || c <= c_floor || !has_amin
+	
+			if !isfinite(c) || c <= c_floor || !isfinite(Vp_amin) || Vp_amin <= V_penalty
 				a_p_current_a[a_i] = ap
 				c_current_a[a_i]   = c_floor
 				V_current_a[a_i]   = V_penalty
 			else
 				a_p_current_a[a_i] = ap
 				c_current_a[a_i]   = c
-				Vp                 = V_endo_v[1]
-				V_current_a[a_i]   = u_CRRA(c, one_m_γ, inv_one_m_γ; c_floor = c_floor, V_penalty = V_penalty) + β * Vp
+				V_current_a[a_i]   = u_CRRA(c, one_m_γ, inv_one_m_γ; c_floor=c_floor, V_penalty=V_penalty) + β * Vp_amin
 			end
 		end
 	end
@@ -879,44 +878,48 @@ function infertile_step!(
 	ibind = searchsortedlast(a_grid, a_endo_v[1])
 
 	if ibind > 0
-		has_amin = (ap_endo_v[1] == a_min)
-
+		Vp_amin = V_next_a[1]
+	
 		@inbounds for a_i in 1:ibind
 			aR = aR_grid[a_i]
 			M  = aR + w_bar
 			ap = a_min
 			m  = M - ap
-
-			if !has_amin || m <= e_bar + c_floor
+	
+			# static feasibility: must afford e_bar + c_floor
+			if m <= e_bar + c_floor || !isfinite(Vp_amin) || Vp_amin <= V_penalty
 				V_current_a[a_i]   = V_penalty
 				c_current_a[a_i]   = c_floor
 				a_p_current_a[a_i] = ap
 				e_current_a[a_i]   = e_bar
-			else
-				Vp = V_endo_v[1]
-				if !isfinite(Vp) || Vp <= V_penalty
-					V_current_a[a_i]   = V_penalty
-					c_current_a[a_i]   = c_floor
-					a_p_current_a[a_i] = ap
-					e_current_a[a_i]   = e_bar
-					continue
-				end
-				e = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar)
-				if !isfinite(e) || e < e_bar
-					V_current_a[a_i]   = V_penalty
-					c_current_a[a_i]   = c_floor
-					a_p_current_a[a_i] = ap
-					e_current_a[a_i]   = e_bar
-					continue
-				end
-				c                  = m - e
-				V_current_a[a_i]   = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, scale; c_floor = c_floor, V_penalty = V_penalty) + β * Vp
-				c_current_a[a_i]   = c
+				continue
+			end
+	
+			e = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar)
+			if !isfinite(e) || e < e_bar
+				V_current_a[a_i]   = V_penalty
+				c_current_a[a_i]   = c_floor
+				a_p_current_a[a_i] = ap
+				e_current_a[a_i]   = e_bar
+				continue
+			end
+	
+			c = m - e
+			if !isfinite(c) || c <= c_floor
+				V_current_a[a_i]   = V_penalty
+				c_current_a[a_i]   = c_floor
 				a_p_current_a[a_i] = ap
 				e_current_a[a_i]   = e
+				continue
 			end
+	
+			V_current_a[a_i] = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, scale;
+										c_floor=c_floor, V_penalty=V_penalty) + β * Vp_amin
+			c_current_a[a_i]   = c
+			a_p_current_a[a_i] = ap
+			e_current_a[a_i]   = e
 		end
-	end
+	end	
 
 	@inbounds for a_i in (ibind+1):a_size
 		a = a_grid[a_i]
