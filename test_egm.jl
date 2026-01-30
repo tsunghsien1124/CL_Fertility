@@ -538,7 +538,7 @@ end
 ###############  End diagnostics toolbox ###############
 
 out = plot_retminus2_ap_compare(variables, parameters;
-    ϵ_i=4, ν_i=3, n_val=1.0,
+    ϵ_i=5, ν_i=3, n_val=4.0,
     Ngrid=120, refine=true,
     savepath=joinpath(pwd(), "ret2_ap_policy_e4v3_n1.png"), 
     do_display=true

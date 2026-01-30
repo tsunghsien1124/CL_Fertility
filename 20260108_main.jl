@@ -689,21 +689,21 @@ function retired_step!(
 	ibind = searchsortedlast(a_grid, a_endo_v[1])
 
 	if ibind > 0
-		Vp_amin = V_next_a[1]
-	
+		ap_floor = ap_endo_v[1]
+		Vp_floor = V_endo_v[1]
 		@inbounds for a_i in 1:ibind
 			aR = aR_grid[a_i]
-			ap = a_min
+			ap = ap_floor
 			c  = aR + w_bar - ap
-	
-			if !isfinite(c) || c <= c_floor || !isfinite(Vp_amin) || Vp_amin <= V_penalty
+
+			if !isfinite(c) || c <= c_floor || !isfinite(Vp_floor) || Vp_floor <= V_penalty
 				a_p_current_a[a_i] = ap
 				c_current_a[a_i]   = c_floor
 				V_current_a[a_i]   = V_penalty
 			else
 				a_p_current_a[a_i] = ap
 				c_current_a[a_i]   = c
-				V_current_a[a_i]   = u_CRRA(c, one_m_γ, inv_one_m_γ; c_floor=c_floor, V_penalty=V_penalty) + β * Vp_amin
+				V_current_a[a_i]   = u_CRRA(c, one_m_γ, inv_one_m_γ; c_floor = c_floor, V_penalty = V_penalty) + β * Vp_floor
 			end
 		end
 	end
@@ -810,8 +810,8 @@ function infertile_step!(
 	@unpack β, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ = parameters
 	@unpack n_grid, ψ, γ, κ = parameters
 	@unpack c_floor, V_penalty = parameters
-	
-	scale = (n / P)^one_m_κ 
+
+	scale = (n / P)^one_m_κ
 	e_para = (ψ * scale)^inv_κ
 
 	if !isfinite(e_para)
@@ -878,23 +878,22 @@ function infertile_step!(
 	ibind = searchsortedlast(a_grid, a_endo_v[1])
 
 	if ibind > 0
-		Vp_amin = V_next_a[1]
-	
+		ap_floor = ap_endo_v[1]
+		Vp_floor = V_endo_v[1]
 		@inbounds for a_i in 1:ibind
 			aR = aR_grid[a_i]
 			M  = aR + w_bar
-			ap = a_min
+			ap = ap_floor
 			m  = M - ap
-	
-			# static feasibility: must afford e_bar + c_floor
-			if m <= e_bar + c_floor || !isfinite(Vp_amin) || Vp_amin <= V_penalty
+
+			if !isfinite(Vp_floor) || Vp_floor <= V_penalty || m <= e_bar + c_floor
 				V_current_a[a_i]   = V_penalty
 				c_current_a[a_i]   = c_floor
 				a_p_current_a[a_i] = ap
 				e_current_a[a_i]   = e_bar
 				continue
 			end
-	
+
 			e = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar)
 			if !isfinite(e) || e < e_bar
 				V_current_a[a_i]   = V_penalty
@@ -903,23 +902,23 @@ function infertile_step!(
 				e_current_a[a_i]   = e_bar
 				continue
 			end
-	
+
 			c = m - e
 			if !isfinite(c) || c <= c_floor
 				V_current_a[a_i]   = V_penalty
 				c_current_a[a_i]   = c_floor
 				a_p_current_a[a_i] = ap
-				e_current_a[a_i]   = e
+				e_current_a[a_i]   = e_bar
 				continue
 			end
-	
-			V_current_a[a_i] = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, scale;
-										c_floor=c_floor, V_penalty=V_penalty) + β * Vp_amin
+
+			V_current_a[a_i]   = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, scale;
+			c_floor = c_floor, V_penalty = V_penalty) + β * Vp_floor
 			c_current_a[a_i]   = c
 			a_p_current_a[a_i] = ap
 			e_current_a[a_i]   = e
 		end
-	end	
+	end
 
 	@inbounds for a_i in (ibind+1):a_size
 		a = a_grid[a_i]
@@ -1040,7 +1039,7 @@ function fill_EV_Euc!(
 			@views Γt = Γ_ret[:, :, ϵ_i]
 			@views Vt = V_next[a_p_i, :, :]
 			@views ct = policy_c_next[a_p_i, :, :]
-			EV  = 0.0
+			EV = 0.0
 			Euc = 0.0
 			bad = false
 			for k in eachindex(Γt)
@@ -1070,7 +1069,7 @@ function fill_EV_Euc!(
 			@views Γt = Γ_inf[:, :, :, n_i, ϵ_i]
 			@views Vt = V_next[a_p_i, :, :, :]
 			@views ct = policy_c_next[a_p_i, :, :, :]
-			EV  = 0.0
+			EV = 0.0
 			Euc = 0.0
 			bad = false
 			for k in eachindex(Γt)
@@ -1100,7 +1099,7 @@ function fill_EV_Euc!(
 			@views Γt = Γ[:, :, :, :, n_i, ϵ_i, inf_i, age_i]
 			@views Vt = V_next[a_p_i, :, :, :, :]
 			@views ct = policy_c_next[a_p_i, :, :, :, :]
-			EV  = 0.0
+			EV = 0.0
 			Euc = 0.0
 			bad = false
 			for k in eachindex(Γt)
@@ -1417,47 +1416,47 @@ save_JLD_function!(variables, parameters, filename = "workspace_benchmark_new.jl
 age_ind = 6
 
 plot_K_a = plot(
-    box=:on,
-    size=[800, 600],
-    # xlim=[0, 80],
-    # xticks=0:10:80,
-    ylim=[-0.1, 1.1],
-    yticks=0:1:1,
-    xtickfont=font(16, "Computer Modern", :black),
-    ytickfont=font(16, "Computer Modern", :black),
-    legendfont=font(16, "Computer Modern", :black),
-    guidefont=font(18, "Computer Modern", :black),
-    titlefont=font(18, "Computer Modern", :black),
-    margin=4mm,
-    xlabel="Asset",
-    ylabel="New Child",
-	legend=:right
+	box = :on,
+	size = [800, 600],
+	# xlim=[0, 80],
+	# xticks=0:10:80,
+	ylim = [-0.1, 1.1],
+	yticks = 0:1:1,
+	xtickfont = font(16, "Computer Modern", :black),
+	ytickfont = font(16, "Computer Modern", :black),
+	legendfont = font(16, "Computer Modern", :black),
+	guidefont = font(18, "Computer Modern", :black),
+	titlefont = font(18, "Computer Modern", :black),
+	margin = 4mm,
+	xlabel = "Asset",
+	ylabel = "New Child",
+	legend = :right,
 )
 
 plot_K_a = plot!(
-    parameters.a_grid,
-    variables.policy_K[:,1,ϵ_ind,ν_ind,1,age_ind],
-    label="Age $(parameters.age_grid[age_ind])",
-    lw=3,
-    lc=:blue
+	parameters.a_grid,
+	variables.policy_K[:, 1, ϵ_ind, ν_ind, 1, age_ind],
+	label = "Age $(parameters.age_grid[age_ind])",
+	lw = 3,
+	lc = :blue,
 )
 
 plot_K_a = plot!(
-    parameters.a_grid,
-    variables.policy_K[:,1,ϵ_ind,ν_ind,1,age_ind+1],
-    label="Age $(parameters.age_grid[age_ind+1])",
-    lw=3,
-    lc=:red,
-	ls=:dash
+	parameters.a_grid,
+	variables.policy_K[:, 1, ϵ_ind, ν_ind, 1, age_ind+1],
+	label = "Age $(parameters.age_grid[age_ind+1])",
+	lw = 3,
+	lc = :red,
+	ls = :dash,
 )
 
 plot_K_a = plot!(
-    parameters.a_grid,
-    variables.policy_K[:,1,ϵ_ind,ν_ind,1,age_ind+2],
-    label="Age $(parameters.age_grid[age_ind+2])",
-    lw=3,
-    lc=:black,
-	ls=:dot	
+	parameters.a_grid,
+	variables.policy_K[:, 1, ϵ_ind, ν_ind, 1, age_ind+2],
+	label = "Age $(parameters.age_grid[age_ind+2])",
+	lw = 3,
+	lc = :black,
+	ls = :dot,
 )
 
 savefig(plot_K_a, string("plot_K_a.pdf"))
@@ -1468,45 +1467,45 @@ a_ind = 10
 age_ind = 7
 
 plot_K_ϵ = plot(
-    box=:on,
-    size=[800, 600],
-    ylim=[-0.1, 1.1],
-    yticks=0:1:1,
-    xtickfont=font(16, "Computer Modern", :black),
-    ytickfont=font(16, "Computer Modern", :black),
-    legendfont=font(16, "Computer Modern", :black),
-    guidefont=font(18, "Computer Modern", :black),
-    titlefont=font(18, "Computer Modern", :black),
-    margin=4mm,
-    xlabel="Persistent Income",
-    ylabel="New Child",
-	legend=:left
+	box = :on,
+	size = [800, 600],
+	ylim = [-0.1, 1.1],
+	yticks = 0:1:1,
+	xtickfont = font(16, "Computer Modern", :black),
+	ytickfont = font(16, "Computer Modern", :black),
+	legendfont = font(16, "Computer Modern", :black),
+	guidefont = font(18, "Computer Modern", :black),
+	titlefont = font(18, "Computer Modern", :black),
+	margin = 4mm,
+	xlabel = "Persistent Income",
+	ylabel = "New Child",
+	legend = :left,
 )
 
 plot_K_ϵ = plot!(
-    parameters.ϵ_grid,
-    variables.policy_K[a_ind,1,:,ν_ind,1,age_ind],
-    label="Age $(parameters.age_grid[age_ind])",
-    lw=3,
-    lc=:blue
+	parameters.ϵ_grid,
+	variables.policy_K[a_ind, 1, :, ν_ind, 1, age_ind],
+	label = "Age $(parameters.age_grid[age_ind])",
+	lw = 3,
+	lc = :blue,
 )
 
 plot_K_ϵ = plot!(
-    parameters.ϵ_grid,
-    variables.policy_K[a_ind,1,:,ν_ind,1,age_ind+1],
-    label="Age $(parameters.age_grid[age_ind+1])",
-    lw=3,
-    lc=:red,
-	ls=:dash
+	parameters.ϵ_grid,
+	variables.policy_K[a_ind, 1, :, ν_ind, 1, age_ind+1],
+	label = "Age $(parameters.age_grid[age_ind+1])",
+	lw = 3,
+	lc = :red,
+	ls = :dash,
 )
 
 plot_K_ϵ = plot!(
-    parameters.ϵ_grid,
-    variables.policy_K[a_ind,1,:,ν_ind,1,age_ind+2],
-    label="Age $(parameters.age_grid[age_ind+2])",
-    lw=3,
-    lc=:black,
-	ls=:dot	
+	parameters.ϵ_grid,
+	variables.policy_K[a_ind, 1, :, ν_ind, 1, age_ind+2],
+	label = "Age $(parameters.age_grid[age_ind+2])",
+	lw = 3,
+	lc = :black,
+	ls = :dot,
 )
 
 savefig(plot_K_ϵ, string("plot_K_ϵ.pdf"))
@@ -1517,45 +1516,45 @@ a_ind = 12
 age_ind = 7
 
 plot_K_ν = plot(
-    box=:on,
-    size=[800, 600],
-    ylim=[-0.1, 1.1],
-    yticks=0:1:1,
-    xtickfont=font(16, "Computer Modern", :black),
-    ytickfont=font(16, "Computer Modern", :black),
-    legendfont=font(16, "Computer Modern", :black),
-    guidefont=font(18, "Computer Modern", :black),
-    titlefont=font(18, "Computer Modern", :black),
-    margin=4mm,
-    xlabel="Transitory Income",
-    ylabel="New Child",
-	legend=:left
+	box = :on,
+	size = [800, 600],
+	ylim = [-0.1, 1.1],
+	yticks = 0:1:1,
+	xtickfont = font(16, "Computer Modern", :black),
+	ytickfont = font(16, "Computer Modern", :black),
+	legendfont = font(16, "Computer Modern", :black),
+	guidefont = font(18, "Computer Modern", :black),
+	titlefont = font(18, "Computer Modern", :black),
+	margin = 4mm,
+	xlabel = "Transitory Income",
+	ylabel = "New Child",
+	legend = :left,
 )
 
 plot_K_ν = plot!(
-    parameters.ν_grid,
-    variables.policy_K[a_ind,1,ϵ_ind,:,1,age_ind],
-    label="Age $(parameters.age_grid[age_ind])",
-    lw=3,
-    lc=:blue
+	parameters.ν_grid,
+	variables.policy_K[a_ind, 1, ϵ_ind, :, 1, age_ind],
+	label = "Age $(parameters.age_grid[age_ind])",
+	lw = 3,
+	lc = :blue,
 )
 
 plot_K_ν = plot!(
-    parameters.ν_grid,
-    variables.policy_K[a_ind,1,ϵ_ind,:,1,age_ind+1],
-    label="Age $(parameters.age_grid[age_ind+1])",
-    lw=3,
-    lc=:red,
-	ls=:dash
+	parameters.ν_grid,
+	variables.policy_K[a_ind, 1, ϵ_ind, :, 1, age_ind+1],
+	label = "Age $(parameters.age_grid[age_ind+1])",
+	lw = 3,
+	lc = :red,
+	ls = :dash,
 )
 
 plot_K_ν = plot!(
-    parameters.ν_grid,
-    variables.policy_K[a_ind,1,ϵ_ind,:,1,age_ind+2],
-    label="Age $(parameters.age_grid[age_ind+2])",
-    lw=3,
-    lc=:black,
-	ls=:dot	
+	parameters.ν_grid,
+	variables.policy_K[a_ind, 1, ϵ_ind, :, 1, age_ind+2],
+	label = "Age $(parameters.age_grid[age_ind+2])",
+	lw = 3,
+	lc = :black,
+	ls = :dot,
 )
 
 savefig(plot_K_ν, string("plot_K_ν.pdf"))
@@ -1569,119 +1568,119 @@ using QuantEcon: Categorical
 using Polyester
 
 @inline function make_thread_rngs(; seed::UInt64 = UInt64(1124))
-    nt = Threads.nthreads()
-    key = (seed, UInt64(0))
-    return [Philox4x(UInt64, key) for _ in 1:nt]
+	nt = Threads.nthreads()
+	key = (seed, UInt64(0))
+	return [Philox4x(UInt64, key) for _ in 1:nt]
 end
 
 @inline base_counter(h_id::UInt64, t_id::UInt64) = (h_id << 44) | (t_id << 24)
 
 @inline function ap_policy_to_index(
-    rng,
-    a_grid::AbstractVector{Float64},
-    ap::Float64,
-	a_size::Int
+	rng,
+	a_grid::AbstractVector{Float64},
+	ap::Float64,
+	a_size::Int,
 )::Int
-    if ap ≤ a_grid[1]
-        return 1
-    elseif ap ≥ a_grid[end]
-        return a_size
-    else
-        j  = searchsortedlast(a_grid, ap)
-        a0 = a_grid[j]
-        a1 = a_grid[j+1]
-        w  = (ap - a0) / (a1 - a0)
-        return (rand(rng) < w) ? (j + 1) : j
-    end
+	if ap ≤ a_grid[1]
+		return 1
+	elseif ap ≥ a_grid[end]
+		return a_size
+	else
+		j  = searchsortedlast(a_grid, ap)
+		a0 = a_grid[j]
+		a1 = a_grid[j+1]
+		w  = (ap - a0) / (a1 - a0)
+		return (rand(rng) < w) ? (j + 1) : j
+	end
 end
 
 struct SimulatedPanel
-    a_state::Matrix{Int}
-    n_state::Matrix{Int}
-    ϵ_state::Matrix{Int}
-    ν_state::Matrix{Int}
-    f_state::Matrix{Int}
-    ap_choice::Matrix{Int}
-    c_choice::Matrix{Float64}
-    e_choice::Matrix{Float64}
-    K_choice::Matrix{Int8}
-    ΔK_choice::Matrix{Int8}
+	a_state::Matrix{Int}
+	n_state::Matrix{Int}
+	ϵ_state::Matrix{Int}
+	ν_state::Matrix{Int}
+	f_state::Matrix{Int}
+	ap_choice::Matrix{Int}
+	c_choice::Matrix{Float64}
+	e_choice::Matrix{Float64}
+	K_choice::Matrix{Int8}
+	ΔK_choice::Matrix{Int8}
 end
 
 function initialize_panel(; num_households::Int, num_periods::Int)
-    T, N = num_periods, num_households
-    return SimulatedPanel(
-        zeros(Int, T, N),
-        zeros(Int, T, N),
-        zeros(Int, T, N),
-        zeros(Int, T, N),
-        zeros(Int, T, N),
-        zeros(Int, T, N),
-        zeros(Float64, T, N),
-        zeros(Float64, T, N),
-        zeros(Int8, T, N),
-        zeros(Int8, T, N),
-		)
+	T, N = num_periods, num_households
+	return SimulatedPanel(
+		zeros(Int, T, N),
+		zeros(Int, T, N),
+		zeros(Int, T, N),
+		zeros(Int, T, N),
+		zeros(Int, T, N),
+		zeros(Int, T, N),
+		zeros(Float64, T, N),
+		zeros(Float64, T, N),
+		zeros(Int8, T, N),
+		zeros(Int8, T, N),
+	)
 end
 
 function simulate_household_panel!(
-    panel::SimulatedPanel,
-    variables::Mutable_Variables,
-    parameters::NamedTuple;
-    seed::UInt64 = UInt64(1124),
+	panel::SimulatedPanel,
+	variables::Mutable_Variables,
+	parameters::NamedTuple;
+	seed::UInt64 = UInt64(1124),
 )
-    @unpack a_grid, a_ind_zero, a_size, ϵ_size, n_size, n_Γ, ϵ_Γ, ϵ_G, ν_Γ, inf_grid, age_ret, age_inf, age_min = parameters
+	@unpack a_grid, a_ind_zero, a_size, ϵ_size, n_size, n_Γ, ϵ_Γ, ϵ_G, ν_Γ, inf_grid, age_ret, age_inf, age_min = parameters
 
-    T, N = size(panel.a_state)
+	T, N = size(panel.a_state)
 
-    ϵ_init = Categorical(ϵ_G)
-    ν_iid  = Categorical(ν_Γ)
-    ϵ_cat  = [Categorical(ϵ_Γ[i, :]) for i in 1:ϵ_size]
-    n_cat  = [Categorical(n_Γ[i, :]) for i in 1:n_size]
+	ϵ_init = Categorical(ϵ_G)
+	ν_iid  = Categorical(ν_Γ)
+	ϵ_cat  = [Categorical(ϵ_Γ[i, :]) for i in 1:ϵ_size]
+	n_cat   = [Categorical(n_Γ[i, :]) for i in 1:n_size]
 
-    rngs = make_thread_rngs(seed = seed)
+	rngs = make_thread_rngs(seed = seed)
 
-    @batch for h in 1:N
+	@batch for h in 1:N
 
-        rng = rngs[Threads.threadid()]
-        h_id = UInt64(h)
+		rng = rngs[Threads.threadid()]
+		h_id = UInt64(h)
 
-        set_counter!(rng, base_counter(h_id, UInt64(0)))
+		set_counter!(rng, base_counter(h_id, UInt64(0)))
 
-        panel.a_state[1, h] = a_ind_zero
-        panel.n_state[1, h] = 1
-        panel.f_state[1, h] = 1
-        panel.ϵ_state[1, h] = rand(rng, ϵ_init)
-        panel.ν_state[1, h] = rand(rng, ν_iid)
+		panel.a_state[1, h] = a_ind_zero
+		panel.n_state[1, h] = 1
+		panel.f_state[1, h] = 1
+		panel.ϵ_state[1, h] = rand(rng, ϵ_init)
+		panel.ν_state[1, h] = rand(rng, ν_iid)
 
-        @inbounds for t in 1:(T-1)
+		@inbounds for t in 1:(T-1)
 
 			set_counter!(rng, base_counter(h_id, UInt64(t)))
 
-            a_i = panel.a_state[t, h]
-            n_i = panel.n_state[t, h]
-            ϵ_i = panel.ϵ_state[t, h]
-            ν_i = panel.ν_state[t, h]
-            f_i = panel.f_state[t, h]
+			a_i = panel.a_state[t, h]
+			n_i = panel.n_state[t, h]
+			ϵ_i = panel.ϵ_state[t, h]
+			ν_i = panel.ν_state[t, h]
+			f_i = panel.f_state[t, h]
 
-            c_raw  = variables.policy_c[a_i, n_i, ϵ_i, ν_i, f_i, t]
-            e_raw  = variables.policy_e[a_i, n_i, ϵ_i, ν_i, f_i, t]
-            panel.c_choice[t, h] = c_raw
-            panel.e_choice[t, h] = e_raw
+			c_raw = variables.policy_c[a_i, n_i, ϵ_i, ν_i, f_i, t]
+			e_raw = variables.policy_e[a_i, n_i, ϵ_i, ν_i, f_i, t]
+			panel.c_choice[t, h] = c_raw
+			panel.e_choice[t, h] = e_raw
 
-			K_raw  = variables.policy_K[a_i, n_i, ϵ_i, ν_i, f_i, t]
+			K_raw = variables.policy_K[a_i, n_i, ϵ_i, ν_i, f_i, t]
 			K01 = (K_raw >= 0.5) ? Int8(1) : Int8(0)
-            panel.K_choice[t, h] = K01
+			panel.K_choice[t, h] = K01
 
 			Δa_i = a_i != a_size ? a_i + 1 : a_size
-            ΔK_raw  = variables.policy_K[Δa_i, n_i, ϵ_i, ν_i, f_i, t]
+			ΔK_raw = variables.policy_K[Δa_i, n_i, ϵ_i, ν_i, f_i, t]
 			ΔK01 = (ΔK_raw >= 0.5) ? Int8(1) : Int8(0)
-            panel.ΔK_choice[t, h] = ΔK01
+			panel.ΔK_choice[t, h] = ΔK01
 
 			ap_raw = variables.policy_a_p[a_i, n_i, ϵ_i, ν_i, f_i, t]
-            ap_idx = ap_policy_to_index(rng, a_grid, ap_raw, a_size)
-            panel.ap_choice[t, h] = ap_idx
-            panel.a_state[t+1, h] = ap_idx
+			ap_idx = ap_policy_to_index(rng, a_grid, ap_raw, a_size)
+			panel.ap_choice[t, h] = ap_idx
+			panel.a_state[t+1, h] = ap_idx
 
 			if t < age_ret - age_min
 				n_eff = min(n_size, n_i + Int(K_raw))
@@ -1698,20 +1697,20 @@ function simulate_household_panel!(
 				panel.ν_state[t+1, h] = ν_i
 			end
 
-            if (f_i == 1) && (t <= (age_inf - age_min))
-                panel.f_state[t+1, h] = (rand(rng) < inf_grid[t]) ? 2 : 1
-            else
-                panel.f_state[t+1, h] = 2
-            end
-        end
-    end
-    return nothing
+			if (f_i == 1) && (t <= (age_inf - age_min))
+				panel.f_state[t+1, h] = (rand(rng) < inf_grid[t]) ? 2 : 1
+			else
+				panel.f_state[t+1, h] = 2
+			end
+		end
+	end
+	return nothing
 end
 
 T = parameters.age_size
 N = 300_000
-panel = initialize_panel(num_households=N, num_periods=T)
-simulate_household_panel!(panel, variables, parameters; seed=UInt64(20260118))
+panel = initialize_panel(num_households = N, num_periods = T)
+simulate_household_panel!(panel, variables, parameters; seed = UInt64(20260118))
 
 # panel_a_low_inf, panel_a_p_low_inf, panel_x_low_inf, panel_l_low_inf, panel_n_low_inf, panel_K_low_inf, shock_ϵ_low_inf, shock_ν_low_inf, shock_f_low_inf = simulation_function(num_hh = num_hh, filename = "workspace_low_inf.jld2")
 
@@ -1975,83 +1974,83 @@ using FixedEffectModels
 using Plots
 
 function _term_group_index(term::AbstractString, levels::Vector{String})
-    for (k, lev) in pairs(levels)
-        occursin(lev, term) && return k
-    end
-    return missing
+	for (k, lev) in pairs(levels)
+		occursin(lev, term) && return k
+	end
+	return missing
 end
 
-function short_run_regression(panel::SimulatedPanel, parameters; savepath::String="plot_short_run.pdf")
+function short_run_regression(panel::SimulatedPanel, parameters; savepath::String = "plot_short_run.pdf")
 
-    @unpack a_size, a_grid, age_grid = parameters
+	@unpack a_size, a_grid, age_grid = parameters
 
-    panel_K  = permutedims(Float64.(panel.K_choice))
-    panel_dK = permutedims(Float64.(panel.ΔK_choice)) .- panel_K
-    panel_a  = permutedims(panel.a_state)
-    panel_a_adj = clamp.(panel_a, 1, a_size-1)
-    panel_da = a_grid[panel_a_adj .+ 1] .- a_grid[panel_a_adj]
+	panel_K = permutedims(Float64.(panel.K_choice))
+	panel_dK = permutedims(Float64.(panel.ΔK_choice)) .- panel_K
+	panel_a = permutedims(panel.a_state)
+	panel_a_adj = clamp.(panel_a, 1, a_size-1)
+	panel_da = a_grid[panel_a_adj .+ 1] .- a_grid[panel_a_adj]
 
-    I, J = size(panel_dK)
+	I, J = size(panel_dK)
 
-    df = DataFrame(
-        i   = repeat(1:I, J),
-        age = repeat(age_grid, inner=I),
-        dK  = vec(panel_dK),
-        ai  = vec(panel_a),
-        da  = vec(panel_da),
-    )
+	df = DataFrame(
+		i   = repeat(1:I, J),
+		age = repeat(age_grid, inner = I),
+		dK  = vec(panel_dK),
+		ai  = vec(panel_a),
+		da  = vec(panel_da),
+	)
 
-    df = df[df.ai .!= a_size, :]
+	df = df[df.ai .!= a_size, :]
 
-    df.age_group = map(df.age) do j
-        if 15 <= j <= 19
-            "15-19"
-        elseif 20 <= j <= 24
-            "20-24"
-        elseif 25 <= j <= 29
-            "25-29"
-        elseif 30 <= j <= 34
-            "30-34"
-        elseif 35 <= j <= 39
-            "35-39"
-        elseif 40 <= j <= 44
-            "40-44"
-        elseif 45 <= j <= 49
-            "45-49"
-        else
-            missing
-        end
-    end
-    dropmissing!(df, [:age_group])
+	df.age_group = map(df.age) do j
+		if 15 <= j <= 19
+			"15-19"
+		elseif 20 <= j <= 24
+			"20-24"
+		elseif 25 <= j <= 29
+			"25-29"
+		elseif 30 <= j <= 34
+			"30-34"
+		elseif 35 <= j <= 39
+			"35-39"
+		elseif 40 <= j <= 44
+			"40-44"
+		elseif 45 <= j <= 49
+			"45-49"
+		else
+			missing
+		end
+	end
+	dropmissing!(df, [:age_group])
 
-    levels = ["15-19", "20-24", "25-29", "30-34", "35-39", "40-44", "45-49"]
-    df.age_group = CategoricalArray(df.age_group; ordered=true, levels=levels)
+	levels = ["15-19", "20-24", "25-29", "30-34", "35-39", "40-44", "45-49"]
+	df.age_group = CategoricalArray(df.age_group; ordered = true, levels = levels)
 
-    m = reg(df, @formula(dK ~ 0 + age_group + da & age_group), Vcov.cluster(:i))
-    println(m)
+	m = reg(df, @formula(dK ~ 0 + age_group + da & age_group), Vcov.cluster(:i))
+	println(m)
 
-    out = DataFrame(term = coefnames(m), b = coef(m), se = stderror(m))
+	out = DataFrame(term = coefnames(m), b = coef(m), se = stderror(m))
 
-    alpha = out[contains.(out.term, "da") .&& contains.(out.term, "age_group"), :]
-    alpha.grp = [_term_group_index(t, levels) for t in alpha.term]
-    dropmissing!(alpha, [:grp])
-    sort!(alpha, :grp)
+	alpha = out[contains.(out.term, "da").&&contains.(out.term, "age_group"), :]
+	alpha.grp = [_term_group_index(t, levels) for t in alpha.term]
+	dropmissing!(alpha, [:grp])
+	sort!(alpha, :grp)
 
-    # plot
-    x = 1:nrow(alpha)
-    y = alpha.b
-    yerr = 1.96 .* alpha.se
-    plot_sr = plot(
-        x, y;
-        yerror = yerr,
-        xlabel = "Age group",
-        ylabel = "α_J",
-        xticks = (x, levels[alpha.grp]),
-        legend = false,
-    )
-    savefig(plot_sr, savepath)
+	# plot
+	x = 1:nrow(alpha)
+	y = alpha.b
+	yerr = 1.96 .* alpha.se
+	plot_sr = plot(
+		x, y;
+		yerror = yerr,
+		xlabel = "Age group",
+		ylabel = "α_J",
+		xticks = (x, levels[alpha.grp]),
+		legend = false,
+	)
+	savefig(plot_sr, savepath)
 
-    return (m=m, out=out, alpha=alpha, df=df, plot=plot_sr)
+	return (m = m, out = out, alpha = alpha, df = df, plot = plot_sr)
 end
 
 

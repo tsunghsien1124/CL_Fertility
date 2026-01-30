@@ -24,7 +24,7 @@ n_ind = 2
 ν_ind = 3
 inf_ind = 2
 # age_inf_ind = old["parameters"].age_inf - old["parameters"].age_min + 1
-age_inf_ind = old["parameters"].age_ret - old["parameters"].age_min
+age_inf_ind = old["parameters"].age_ret - old["parameters"].age_min - 1
 
 plot(old["parameters"].a_grid, old["parameters"].a_grid[old["policy_a_p"][:,n_ind,ϵ_ind,ν_ind,inf_ind,age_inf_ind]], label="old")
 plot!(new["parameters"].a_grid, new["policy_a_p"][:,n_ind,ϵ_ind,ν_ind,inf_ind,age_inf_ind], label="new")
