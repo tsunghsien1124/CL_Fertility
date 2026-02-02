@@ -39,6 +39,43 @@ end
 # maximize u(c,e)+β*EV_next(ap) over ap in [a_min, M-e_bar-c_floor]
 # where e is solved by solve_e_bisect when n>0, or e=0 if n=0
 # -------------------------
+# ------------------------------------------------------------
+# Deterministic 1D minimizer (golden section) for refinement
+# ------------------------------------------------------------
+@inline function golden_argmin(f, a::Float64, b::Float64;
+                               tol::Float64 = 1e-12,
+                               maxit::Int = 250)::Float64
+    ϕ = 0.6180339887498949
+    c = b - ϕ * (b - a)
+    d = a + ϕ * (b - a)
+    fc = f(c)
+    fd = f(d)
+
+    @inbounds for _ in 1:maxit
+        mid = 0.5 * (a + b)
+        if (b - a) <= tol * (1.0 + abs(mid))
+            break
+        end
+        if fd < fc
+            a  = c
+            c  = d
+            fc = fd
+            d  = a + ϕ * (b - a)
+            fd = f(d)
+        else
+            b  = d
+            d  = c
+            fd = fc
+            c  = b - ϕ * (b - a)
+            fc = f(c)
+        end
+    end
+    return (fc <= fd) ? c : d
+end
+
+# ------------------------------------------------------------
+# DROP-IN replacement: opt_state_retminus2
+# ------------------------------------------------------------
 function opt_state_retminus2(
     M::Float64,
     n::Float64,
@@ -46,65 +83,74 @@ function opt_state_retminus2(
     e_bar::Float64,
     EV_next_a::AbstractVector{Float64},
     parameters;
-    Ngrid::Int=120,
-    refine::Bool=true,
+    Ngrid::Int = 120,
+    refine::Bool = true,
+    refine_tol::Float64 = 1e-12,
 )
     @unpack a_grid, a_min, β, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ = parameters
     @unpack ψ, γ, κ, c_floor, V_penalty = parameters
 
+    PEN = 1e30
+
     ap_lo = a_min
-    ap_hi = M - e_bar - c_floor
-    if !(ap_hi > ap_lo) || !isfinite(ap_hi)
-        return (ok=false, V=V_penalty, c=c_floor, ap=a_min, e=e_bar)
+    ap_hi_raw = (n == 0.0) ? (M - c_floor) : (M - e_bar - c_floor)
+    ap_hi = min(a_grid[end], ap_hi_raw)
+
+    if !(isfinite(ap_hi) && ap_hi > ap_lo)
+        return (ok=false, V=V_penalty, c=c_floor, ap=a_min, e=(n==0.0 ? 0.0 : e_bar))
     end
 
-    # minimization objective: f(ap) = -V(ap) for feasible, 1e30 otherwise
-    function f(ap::Float64)
-        if ap < ap_lo || ap > ap_hi
-            return 1e30
+    scale = (n == 0.0) ? 0.0 : (n / P)^one_m_κ
+
+    @inline function f(ap::Float64)::Float64
+        if !(ap_lo <= ap <= ap_hi)
+            return PEN
         end
 
         m = M - ap
         if !isfinite(m)
-            return 1e30
+            return PEN
         end
 
-        # continuation value
-        Vp = lininterp(a_grid, EV_next_a, ap)
-        if !isfinite(Vp) || Vp <= V_penalty
-            return 1e30
+        # match the rest of your code: safe continuation value
+        Vp = Vcont_safe(a_grid, EV_next_a, ap, V_penalty)
+        if !(isfinite(Vp) && Vp > V_penalty)
+            return PEN
         end
 
         if n == 0.0
             c = m
-            if !isfinite(c) || c <= c_floor
-                return 1e30
+            if !(isfinite(c) && c >= c_floor)
+                return PEN
             end
             V = u_CRRA(c, one_m_γ, inv_one_m_γ; c_floor=c_floor, V_penalty=V_penalty) + β*Vp
-            return -V
+            return isfinite(V) ? -V : PEN
         else
-            if m <= e_bar + c_floor
-                return 1e30
+            if m < e_bar + c_floor
+                return PEN
             end
+
             e = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar; c_floor=c_floor)
-            if !isfinite(e) || e < e_bar
-                return 1e30
+            if !isfinite(e)
+                return PEN
             end
+            e = max(e, e_bar)
+
             c = m - e
-            if !isfinite(c) || c <= c_floor
-                return 1e30
+            if !(isfinite(c) && c >= c_floor)
+                return PEN
             end
-            scale = (n / P)^one_m_κ
+
             V = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, scale;
                          c_floor=c_floor, V_penalty=V_penalty) + β*Vp
-            return -V
+            return isfinite(V) ? -V : PEN
         end
     end
 
-    # coarse grid search (minimize f)
-    bestf  = 1e30
+    # ---- coarse grid search ----
+    bestf  = PEN
     bestap = ap_lo
-    for k in 0:Ngrid
+    @inbounds for k in 0:Ngrid
         ap = ap_lo + (ap_hi - ap_lo) * (k / Ngrid)
         fv = f(ap)
         if fv < bestf
@@ -112,36 +158,56 @@ function opt_state_retminus2(
             bestap = ap
         end
     end
-    if !(bestf < 1e29)  # still basically infeasible everywhere
-        return (ok=false, V=V_penalty, c=c_floor, ap=a_min, e=e_bar)
+
+    if !(bestf < PEN/10)
+        return (ok=false, V=V_penalty, c=c_floor, ap=a_min, e=(n==0.0 ? 0.0 : e_bar))
     end
 
     ap_star = bestap
-    f_star  = bestf
 
+    # ---- local refinement around bestap ----
     if refine
         step = (ap_hi - ap_lo) / max(Ngrid, 10)
         lo = max(ap_lo, bestap - 5step)
         hi = min(ap_hi, bestap + 5step)
-        res = optimize(f, lo, hi, Brent())
-        ap_star = Optim.minimizer(res)
-        f_star  = Optim.minimum(res)
+        ap_try = golden_argmin(f, lo, hi; tol=refine_tol, maxit=300)
+        if f(ap_try) < f(ap_star)
+            ap_star = ap_try
+        end
     end
 
-    # recover policies at optimum
-    m = M - ap_star
+    # ---- recover policies/value at ap_star (don’t rely on -bestf) ----
+    m  = M - ap_star
+    Vp = Vcont_safe(a_grid, EV_next_a, ap_star, V_penalty)
+
     if n == 0.0
         e_star = 0.0
         c_star = m
+        if !(isfinite(c_star) && c_star >= c_floor && isfinite(Vp) && Vp > V_penalty)
+            return (ok=false, V=V_penalty, c=c_floor, ap=a_min, e=0.0)
+        end
+        V_star = u_CRRA(c_star, one_m_γ, inv_one_m_γ; c_floor=c_floor, V_penalty=V_penalty) + β*Vp
+        ok = isfinite(V_star) && V_star > V_penalty
+        return (ok=ok, V=(ok ? V_star : V_penalty), c=c_star, ap=ap_star, e=e_star)
     else
         e_star = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar; c_floor=c_floor)
+        if !isfinite(e_star)
+            return (ok=false, V=V_penalty, c=c_floor, ap=a_min, e=e_bar)
+        end
+        e_star = max(e_star, e_bar)
         c_star = m - e_star
-    end
 
-    V_star = -f_star
-    ok = isfinite(V_star) && V_star > V_penalty/2
-    return (ok=ok, V=V_star, c=c_star, ap=ap_star, e=e_star)
+        if !(isfinite(c_star) && c_star >= c_floor && isfinite(Vp) && Vp > V_penalty && m >= e_bar + c_floor)
+            return (ok=false, V=V_penalty, c=c_floor, ap=a_min, e=e_bar)
+        end
+
+        V_star = u_CRRA_e(c_star, e_star, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, scale;
+                          c_floor=c_floor, V_penalty=V_penalty) + β*Vp
+        ok = isfinite(V_star) && V_star > V_penalty
+        return (ok=ok, V=(ok ? V_star : V_penalty), c=c_star, ap=ap_star, e=e_star)
+    end
 end
+
 
 
 # -------------------------
@@ -332,7 +398,7 @@ function plot_retminus2_compare_all(
 end
 
 out = plot_retminus2_compare_all(variables, parameters;
-    ϵ_i=1, ν_i=3, n_val=2.0,
+    ϵ_i=1, ν_i=1, n_val=4.0,
     Ngrid=200, refine=true,
     saveprefix=joinpath(pwd(), "ret2_e4v3_n2"),
     do_display=true

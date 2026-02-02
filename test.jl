@@ -10,7 +10,7 @@ n_ind = 1
 ϵ_ind = 3
 ν_ind = 3
 inf_ind = 2
-age_ret_ind = old["parameters"].age_ret - old["parameters"].age_min + 2
+age_ret_ind = old["parameters"].age_ret - old["parameters"].age_min + 1
 # age_ret_ind = old["parameters"].age_max - old["parameters"].age_min
 
 plot(old["parameters"].a_grid, old["parameters"].a_grid[old["policy_a_p"][:,n_ind,ϵ_ind,ν_ind,inf_ind,age_ret_ind]], label="old")
@@ -19,15 +19,15 @@ plot!(new["parameters"].a_grid, new["policy_a_p"][:,n_ind,ϵ_ind,ν_ind,inf_ind,
 plot(old["parameters"].a_grid, old["V"][:,n_ind,ϵ_ind,ν_ind,inf_ind,age_ret_ind], label="old")
 plot!(new["parameters"].a_grid, new["V"][:,n_ind,ϵ_ind,ν_ind,inf_ind,age_ret_ind], label="new")
 
-n_ind = 3
-ϵ_ind = 1
+n_ind = 2
+ϵ_ind = 3
 ν_ind = 3
 inf_ind = 2
 # age_inf_ind = old["parameters"].age_inf - old["parameters"].age_min + 1
-age_inf_ind = old["parameters"].age_ret - old["parameters"].age_min - 1
+age_inf_ind = old["parameters"].age_ret - old["parameters"].age_min - 2
 
 plot(old["parameters"].a_grid, old["parameters"].a_grid[old["policy_a_p"][:,n_ind,ϵ_ind,ν_ind,inf_ind,age_inf_ind]], label="old")
-plot!(new["parameters"].a_grid, new["policy_a_p"][:,n_ind,ϵ_ind,ν_ind,inf_ind,age_inf_ind], label="new")
+scatter!(new["parameters"].a_grid, new["policy_a_p"][:,n_ind,ϵ_ind,ν_ind,inf_ind,age_inf_ind], label="new")
 
 plot(old["parameters"].a_grid, old["V"][:,n_ind,ϵ_ind,ν_ind,inf_ind,age_inf_ind], label="old")
 plot!(new["parameters"].a_grid, new["V"][:,n_ind,ϵ_ind,ν_ind,inf_ind,age_inf_ind], label="new")

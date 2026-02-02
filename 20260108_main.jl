@@ -126,17 +126,17 @@ function h_function(data_h::Array{Float64, 1}, age_min::Integer, age_ret::Intege
 end
 
 @inline function u_CRRA_e(c::Float64, e::Float64, one_m_γ::Float64, inv_one_m_γ::Float64, one_m_κ::Float64, ψ_inv_one_m_κ::Float64, scale::Float64; c_floor::Float64 = 1e-12, V_penalty::Float64 = -1.0e16)
-	c <= c_floor && return V_penalty
+	c < c_floor && return V_penalty
 	return c^one_m_γ * inv_one_m_γ + scale * e^one_m_κ * ψ_inv_one_m_κ
 end
 
 @inline function u_CRRA(c::Float64, one_m_γ::Float64, inv_one_m_γ::Float64; c_floor::Float64 = 1e-12, V_penalty::Float64 = -1.0e16)
-	c <= c_floor && return V_penalty
+	c < c_floor && return V_penalty
 	return c^one_m_γ * inv_one_m_γ
 end
 
 @inline function u_log(c::Float64; c_floor::Float64 = 1e-12, V_penalty::Float64 = -1.0e16)
-	c <= c_floor && return V_penalty
+	c < c_floor && return V_penalty
 	return log(c)
 end
 
@@ -172,7 +172,7 @@ function parameters_function(;
 	ψ::Real = 3.50,                   # preference scale
 	μ::Real = 0.35,                   # production share
 	θ::Real = 0.70,                   # elasticity of substitution in production
-	q_bar::Real = 1.50,               # lower bound on children's consumption
+	q_bar::Real = 0.73,               # lower bound on children's consumption
 	ψ_1::Real = 0.91,                 # HH economies to money input to production
 	ψ_2::Real = 0.54,                 # HH economies to time input to production
 	p::Real = 0.02, #====================##====================#                   # prob that a child becomes independent
@@ -589,27 +589,37 @@ end
 	end
 end
 
-# @inline function terminal_step!(
-# 	V_end::AbstractArray{Float64, 3},
-# 	policy_c_end::AbstractArray{Float64, 3},
-# 	parameters::NamedTuple,
-# 	ϵ_i::Integer,
-# 	ν_i::Integer,
-# )
-# 	V_end_a = @views V_end[:, ϵ_i, ν_i]
-# 	policy_c_end_a = @views policy_c_end[:, ϵ_i, ν_i]
+@inline function Vcont_safe(a_grid::AbstractVector{Float64},
+	EV_next_a::AbstractVector{Float64},
+	ap::Float64,
+	V_penalty::Float64)
+	if !isfinite(ap)
+		return V_penalty
+	end
 
-# 	@unpack w_grid, aR_grid, one_m_γ, inv_one_m_γ = parameters
-# 	@inbounds w_bar = w_grid[ϵ_i, ν_i, end]
+	if ap <= a_grid[1]
+		v = EV_next_a[1]
+		return (isfinite(v) && v > V_penalty) ? v : V_penalty
+	elseif ap >= a_grid[end]
+		v = EV_next_a[end]
+		return (isfinite(v) && v > V_penalty) ? v : V_penalty
+	end
 
-# 	@inbounds for i in eachindex(aR_grid)
-# 		c = aR_grid[i] + w_bar
-# 		policy_c_end_a[i] = c
-# 		V_end_a[i] = u_CRRA(c, one_m_γ, inv_one_m_γ)
-# 	end
+	j = searchsortedlast(a_grid, ap)
+	@inbounds begin
+		x0 = a_grid[j];
+		x1 = a_grid[j+1]
+		y0 = EV_next_a[j];
+		y1 = EV_next_a[j+1]
+	end
 
-# 	return nothing
-# end
+	if !(isfinite(y0) && y0 > V_penalty && isfinite(y1) && y1 > V_penalty)
+		return V_penalty
+	end
+
+	w = (ap - x0) / (x1 - x0)
+	return muladd(w, (y1 - y0), y0)
+end
 
 @inline function terminal_step!(
 	V_end_a::AbstractVector{Float64},
@@ -628,51 +638,67 @@ end
 end
 
 function opt_ap_binding_retired(
-    M::Float64,
-    EV_next_a::AbstractVector{Float64},
-    parameters::NamedTuple;
-    ap_lo::Float64,
-    ap_hi::Float64,
+	M::Float64,
+	EV_next_a::AbstractVector{Float64},
+	parameters::NamedTuple;
+	ap_lo::Float64,
+	ap_hi::Float64,
 )
-    @unpack a_grid, β, one_m_γ, inv_one_m_γ, c_floor, V_penalty = parameters
+	@unpack a_grid, β, one_m_γ, inv_one_m_γ, c_floor, V_penalty = parameters
 
-    if !(ap_hi > ap_lo)
-        return (false, NaN, NaN, V_penalty)
-    end
+	tol = 10 * eps(max(abs(ap_lo), abs(ap_hi), 1.0))
 
-    PEN = 1e30
+	if ap_hi < ap_lo - tol
+		return (false, NaN, NaN, V_penalty)
+	elseif ap_hi <= ap_lo + tol
+		ap = ap_lo
+		c  = M - ap
+		if !isfinite(c) || c < c_floor
+			return (false, ap, c_floor, V_penalty)
+		end
+		Vp  = Vcont_safe(a_grid, EV_next_a, ap, V_penalty)
+		val = u_CRRA(c, one_m_γ, inv_one_m_γ; c_floor = c_floor, V_penalty = V_penalty) + β*Vp
+		ok  = isfinite(val) && (Vp > V_penalty) && (c >= c_floor)
+		return (ok, ap, c, ok ? val : V_penalty)
+	end
 
-    function obj(ap)
-        c = M - ap
-        if !isfinite(c) || c <= c_floor
-            return PEN
-        end
-        Vp = lininterp(a_grid, EV_next_a, ap)
-        if !isfinite(Vp) || Vp <= V_penalty
-            return PEN
-        end
-        val = u_CRRA(c, one_m_γ, inv_one_m_γ; c_floor=c_floor, V_penalty=V_penalty) + β * Vp
-        return -val
-    end
+	PEN = 1e30
 
-    res = Optim.optimize(obj, ap_lo, ap_hi, Brent())
-    ap  = Optim.minimizer(res)
-    c   = M - ap
-    Vp  = lininterp(a_grid, EV_next_a, ap)
-    val = u_CRRA(c, one_m_γ, inv_one_m_γ; c_floor=c_floor, V_penalty=V_penalty) + β * Vp
+	function obj(ap::Float64)
+		if ap < ap_lo || ap > ap_hi
+			return PEN
+		end
+		c = M - ap
+		if !isfinite(c) || c < c_floor
+			return PEN
+		end
+		Vp = Vcont_safe(a_grid, EV_next_a, ap, V_penalty)
+		if !isfinite(Vp) || Vp <= V_penalty
+			return PEN
+		end
+		val = u_CRRA(c, one_m_γ, inv_one_m_γ; c_floor = c_floor, V_penalty = V_penalty) + β*Vp
+		return -val
+	end
 
-    ok = isfinite(val) && val > V_penalty &&
-         isfinite(Vp)  && Vp  > V_penalty &&
-         isfinite(c)   && c   > c_floor
+	res = Optim.optimize(obj, ap_lo, ap_hi, Brent())
+	ap  = Optim.minimizer(res)
 
-    return (ok, ap, c, val)
+	c   = M - ap
+	Vp  = Vcont_safe(a_grid, EV_next_a, ap, V_penalty)
+	val = u_CRRA(c, one_m_γ, inv_one_m_γ; c_floor = c_floor, V_penalty = V_penalty) + β*Vp
+
+	ok = isfinite(val) && val > V_penalty &&
+		 isfinite(Vp) && Vp > V_penalty &&
+		 isfinite(c) && c >= c_floor
+
+	return (ok, ap, c, ok ? val : V_penalty)
 end
 
 function retired_step!(
 	V_endo::Vector{Float64},
 	a_endo::Vector{Float64},
 	ap_endo::Vector{Float64},
-	V_next_a::AbstractVector{Float64},
+	EV_next_a::AbstractVector{Float64},
 	c_next_a::AbstractVector{Float64},
 	V_current_a::AbstractVector{Float64},
 	c_current_a::AbstractVector{Float64},
@@ -685,16 +711,16 @@ function retired_step!(
 
 	nv = 0
 	@inbounds for ap_i in 1:a_size
-		Vp = V_next_a[ap_i]
+		Vp = EV_next_a[ap_i]
 		if !isfinite(Vp) || Vp <= V_penalty
 			continue
 		end
 		cnext = c_next_a[ap_i]
-		if !isfinite(cnext) || cnext <= c_floor
+		if !isfinite(cnext) || cnext < c_floor
 			continue
 		end
 		c = EGM_fac * cnext
-		if !isfinite(c) || c <= c_floor
+		if !isfinite(c) || c < c_floor
 			continue
 		end
 		ap      = a_grid[ap_i]
@@ -732,20 +758,20 @@ function retired_step!(
 
 	if ibind > 0
 		@inbounds for a_i in 1:ibind
-        	aR = aR_grid[a_i]
-        	M  = aR + w_bar
-        	ap_hi = min(a_grid[end], M - c_floor)
-        	ap_lo = a_min
-        	ok, ap, c, Vnow = opt_ap_binding_retired(M, V_next_a, parameters; ap_lo=ap_lo, ap_hi=ap_hi)
-        	if !ok
-            	a_p_current_a[a_i] = a_min
-            	c_current_a[a_i]   = c_floor
-            	V_current_a[a_i]   = V_penalty
-        	else
-            	a_p_current_a[a_i] = ap
-            	c_current_a[a_i]   = c
-            	V_current_a[a_i]   = Vnow
-        	end
+			aR = aR_grid[a_i]
+			M = aR + w_bar
+			ap_hi = min(a_grid[end], M - c_floor)
+			ap_lo = a_min
+			ok, ap, c, Vnow = opt_ap_binding_retired(M, EV_next_a, parameters; ap_lo = ap_lo, ap_hi = ap_hi)
+			if !ok
+				a_p_current_a[a_i] = a_min
+				c_current_a[a_i]   = c_floor
+				V_current_a[a_i]   = V_penalty
+			else
+				a_p_current_a[a_i] = ap
+				c_current_a[a_i]   = c
+				V_current_a[a_i]   = Vnow
+			end
 		end
 	end
 
@@ -754,14 +780,14 @@ function retired_step!(
 		aR = aR_grid[a_i]
 		ap = lininterp(a_endo_v, ap_endo_v, a)
 		c  = aR + w_bar - ap
-		if !isfinite(c) || c <= c_floor
+		if !isfinite(c) || c < c_floor
 			a_p_current_a[a_i] = ap
 			c_current_a[a_i] = c_floor
 			V_current_a[a_i] = V_penalty
 		else
 			a_p_current_a[a_i] = ap
 			c_current_a[a_i] = c
-			Vp = lininterp(ap_endo_v, V_endo_v, ap)
+			Vp = Vcont_safe(a_grid, EV_next_a, ap, V_penalty)
 			if !isfinite(Vp) || Vp <= V_penalty
 				c_current_a[a_i] = c_floor
 				V_current_a[a_i] = V_penalty
@@ -790,20 +816,54 @@ end
     tol::Float64 = 1e-12,
 )::Float64
 
+    # basic guards
+    if !(isfinite(m) && isfinite(n) && isfinite(P) && isfinite(ψ) &&
+         isfinite(γ) && isfinite(κ) && isfinite(one_m_κ) &&
+         isfinite(e_bar) && isfinite(c_floor))
+        return NaN
+    end
+    if P <= 0.0 || n < 0.0 || e_bar <= 0.0 || c_floor <= 0.0
+        return NaN
+    end
+
     # feasibility upper bound for e given c >= c_floor
     e_hi = m - c_floor
-    if !isfinite(e_hi) || e_hi <= e_bar
-        # infeasible: cannot satisfy e >= e_bar and c >= c_floor simultaneously
+    if !isfinite(e_hi)
         return NaN
     end
 
-    # auxiliary parameter
-    A = ψ * (n / P)^one_m_κ
-    if !isfinite(A) || A <= 0.0
+    # tolerance around the kink e_hi ≈ e_bar
+    tol_e = 10 * eps(max(abs(m), abs(e_bar), 1.0))
+
+    # infeasible: cannot satisfy e >= e_bar and c >= c_floor simultaneously
+    if e_hi < e_bar - tol_e
         return NaN
     end
 
-    # lower bound corner: if g(e_bar) <= 0 => optimum at e = e_bar
+    # degenerate: only feasible point is e = e_bar (within tolerance)
+    if e_hi <= e_bar + tol_e
+        return e_bar
+    end
+
+    # auxiliary parameter A = ψ * (n/P)^(1-κ)
+    ratio = n / P
+    if !(isfinite(ratio) && ratio >= 0.0)
+        return NaN
+    end
+    scale = ratio^one_m_κ
+    if !isfinite(scale)
+        return NaN
+    end
+    A = ψ * scale
+    if !isfinite(A)
+        return NaN
+    end
+    # if marginal benefit is non-positive, corner at e_bar
+    if A <= 0.0
+        return e_bar
+    end
+
+    # bracket checks (MUST use isfinite, not just isnan)
     gl = g_eval(e_bar, m, A, γ, κ)
     if !isfinite(gl)
         return NaN
@@ -812,7 +872,6 @@ end
         return e_bar
     end
 
-    # upper bound corner: if g(e_hi) >= 0 => utility wants more e => choose e_hi
     gh = g_eval(e_hi, m, A, γ, κ)
     if !isfinite(gh)
         return NaN
@@ -825,105 +884,138 @@ end
     lo = e_bar
     hi = e_hi
     mid = 0.5 * (lo + hi)
+
     @inbounds for _ in 1:maxit
         mid = 0.5 * (lo + hi)
         gm = g_eval(mid, m, A, γ, κ)
         if !isfinite(gm)
             return NaN
         end
+
         if abs(gm) <= tol || (hi - lo) <= tol * (1.0 + mid)
             return mid
         end
+
         if gm > 0.0
             lo = mid
         else
             hi = mid
         end
     end
+
     return mid
 end
 
 function opt_ap_binding_infertile(
-    M::Float64,
-    n::Float64,
-    P::Float64,
-    e_bar::Float64,
-    EV_next_a::AbstractVector{Float64},
-    parameters::NamedTuple;
-    ap_lo::Float64,
-    ap_hi::Float64,
+	M::Float64,
+	n::Float64,
+	P::Float64,
+	e_bar::Float64,
+	EV_next_a::AbstractVector{Float64},
+	parameters::NamedTuple;
+	ap_lo::Float64,
+	ap_hi::Float64,
 )
-    @unpack a_grid, β, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ = parameters
-    @unpack ψ, γ, κ, c_floor, V_penalty = parameters
+	@unpack a_grid, β, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ = parameters
+	@unpack ψ, γ, κ, c_floor, V_penalty = parameters
 
-    if !(ap_hi > ap_lo)
-        return (false, NaN, NaN, NaN, V_penalty)
-    end
+	scale = (n / P)^one_m_κ
+	tol = 10 * eps(max(abs(ap_lo), abs(ap_hi), 1.0))
 
-    PEN   = 1e30
-    scale = (n / P)^one_m_κ
+	if ap_hi < ap_lo - tol
+		return (false, NaN, NaN, NaN, V_penalty)
+	elseif ap_hi <= ap_lo + tol
+		ap = ap_lo
+		m  = M - ap
+		if !(isfinite(m) && m >= e_bar + c_floor)
+			return (false, ap, c_floor, e_bar, V_penalty)
+		end
 
-    function obj(ap)
-        if ap < ap_lo || ap > ap_hi
-            return PEN
-        end
+		Vp = Vcont_safe(a_grid, EV_next_a, ap, V_penalty)
+		if !(isfinite(Vp) && Vp > V_penalty)
+			return (false, ap, c_floor, e_bar, V_penalty)
+		end
 
-        m = M - ap
-        if !isfinite(m) || m <= e_bar + c_floor
-            return PEN
-        end
+		e = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar; c_floor = c_floor)
+		if !isfinite(e)
+			return (false, ap, c_floor, e_bar, V_penalty)
+		end
+		e = max(e, e_bar)
 
-        Vp = lininterp(a_grid, EV_next_a, ap)
-        if !isfinite(Vp) || Vp <= V_penalty
-            return PEN
-        end
+		c = m - e
+		if !(isfinite(c) && c >= c_floor)
+			return (false, ap, c_floor, e, V_penalty)
+		end
 
-        e = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar; c_floor=c_floor)
-        if !isfinite(e)
-            return PEN
-        end
-        if e < e_bar
-            e = e_bar
-        end
+		val = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, scale;
+			c_floor = c_floor, V_penalty = V_penalty) + β * Vp
 
-        c = m - e
-        if !isfinite(c) || c <= c_floor
-            return PEN
-        end
+		ok = isfinite(val) && val > V_penalty && Vp > V_penalty && c >= c_floor && e >= e_bar
+		return (ok, ap, c, e, ok ? val : V_penalty)
+	end
 
-        val = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, scale;
-                       c_floor=c_floor, V_penalty=V_penalty) + β * Vp
-        return -val
-    end
+	PEN = 1e30
 
-    res = Optim.optimize(obj, ap_lo, ap_hi, Brent())
-    ap  = Optim.minimizer(res)
+	function obj(ap::Float64)
+		if ap < ap_lo || ap > ap_hi
+			return PEN
+		end
 
-    m  = M - ap
-    Vp = lininterp(a_grid, EV_next_a, ap)
-    e  = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar; c_floor=c_floor)
-    if isfinite(e) && e < e_bar
-        e = e_bar
-    end
-    c  = m - e
+		m = M - ap
+		if !isfinite(m) || m < e_bar + c_floor
+			return PEN
+		end
 
-    val = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, scale;
-                   c_floor=c_floor, V_penalty=V_penalty) + β * Vp
+		Vp = Vcont_safe(a_grid, EV_next_a, ap, V_penalty)
+		if !isfinite(Vp) || Vp <= V_penalty
+			return PEN
+		end
 
-    ok = isfinite(val) && val > V_penalty &&
-         isfinite(Vp)  && Vp  > V_penalty &&
-         isfinite(m)   && m   > e_bar + c_floor &&
-         isfinite(e)   && e   >= e_bar &&
-         isfinite(c)   && c   > c_floor
+		e = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar; c_floor = c_floor)
+		if !isfinite(e)
+			return PEN
+		end
+		e = max(e, e_bar)
 
-    return (ok, ap, c, e, val)
+		c = m - e
+		if !isfinite(c) || c < c_floor
+			return PEN
+		end
+
+		val = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, scale;
+			c_floor = c_floor, V_penalty = V_penalty) + β * Vp
+
+		return (isfinite(val) ? -val : PEN)
+	end
+
+	res = Optim.optimize(obj, ap_lo, ap_hi, Brent())
+	ap  = Optim.minimizer(res)
+
+	m  = M - ap
+	Vp = Vcont_safe(a_grid, EV_next_a, ap, V_penalty)
+	e  = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar; c_floor = c_floor)
+	if !isfinite(e)
+		return (false, ap, c_floor, e_bar, V_penalty)
+	end
+	e = max(e, e_bar)
+
+	c = m - e
+	if !(isfinite(c) && c >= c_floor && isfinite(Vp) && Vp > V_penalty && isfinite(m) && m >= e_bar + c_floor)
+		return (false, ap, c_floor, e, V_penalty)
+	end
+
+	val = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, scale;
+		c_floor = c_floor, V_penalty = V_penalty) + β * Vp
+
+	ok = isfinite(val) && val > V_penalty
+	return (ok, ap, c, e, ok ? val : V_penalty)
 end
 
 function infertile_step!(
 	V_endo::Vector{Float64},
 	a_endo::Vector{Float64},
 	ap_endo::Vector{Float64},
-	V_next_a::AbstractVector{Float64},
+	EV_next_a::AbstractVector{Float64},
 	c_next_a::AbstractVector{Float64},
 	V_current_a::AbstractVector{Float64},
 	c_current_a::AbstractVector{Float64},
@@ -956,16 +1048,16 @@ function infertile_step!(
 
 	nv = 0
 	@inbounds for ap_i in 1:a_size
-		Vp = V_next_a[ap_i]
+		Vp = EV_next_a[ap_i]
 		if !isfinite(Vp) || Vp <= V_penalty
 			continue
 		end
 		cnext = c_next_a[ap_i]
-		if !isfinite(cnext) || cnext <= c_floor
+		if !isfinite(cnext) || cnext < c_floor
 			continue
 		end
 		c = EGM_fac * cnext
-		if !isfinite(c) || c <= c_floor
+		if !isfinite(c) || c < c_floor
 			continue
 		end
 		e_foc = e_para * c^γ_by_κ
@@ -1008,25 +1100,25 @@ function infertile_step!(
 	ibind = searchsortedlast(a_grid, a_endo_v[1])
 
 	if ibind > 0
-    	@inbounds for a_i in 1:ibind
-        	aR = aR_grid[a_i]
-        	M  = aR + w_bar
-        	ap_hi = min(a_grid[end], M - (e_bar + c_floor))
-        	ap_lo = a_min
-        	ok, ap, c, e, Vnow = opt_ap_binding_infertile(M, n, P, e_bar, V_next_a, parameters; ap_lo=ap_lo, ap_hi=ap_hi)
+		@inbounds for a_i in 1:ibind
+			aR = aR_grid[a_i]
+			M = aR + w_bar
+			ap_hi = min(a_grid[end], M - (e_bar + c_floor))
+			ap_lo = a_min
+			ok, ap, c, e, Vnow = opt_ap_binding_infertile(M, n, P, e_bar, EV_next_a, parameters; ap_lo = ap_lo, ap_hi = ap_hi)
 
-        	if !ok
-            	V_current_a[a_i]   = V_penalty
-            	c_current_a[a_i]   = c_floor
-            	a_p_current_a[a_i] = a_min
-            	e_current_a[a_i]   = e_bar
-        	else
-            	V_current_a[a_i]   = Vnow
-            	c_current_a[a_i]   = c
-            	a_p_current_a[a_i] = ap
-            	e_current_a[a_i]   = e
-        	end
-    	end
+			if !ok
+				V_current_a[a_i]   = V_penalty
+				c_current_a[a_i]   = c_floor
+				a_p_current_a[a_i] = a_min
+				e_current_a[a_i]   = e_bar
+			else
+				V_current_a[a_i]   = Vnow
+				c_current_a[a_i]   = c
+				a_p_current_a[a_i] = ap
+				e_current_a[a_i]   = e
+			end
+		end
 	end
 
 	@inbounds for a_i in (ibind+1):a_size
@@ -1035,13 +1127,13 @@ function infertile_step!(
 		ap = lininterp(a_endo_v, ap_endo_v, a)
 		M = aR + w_bar
 		m = M - ap
-		if m <= e_bar + c_floor
+		if m < e_bar + c_floor
 			V_current_a[a_i]   = V_penalty
 			c_current_a[a_i]   = c_floor
 			a_p_current_a[a_i] = ap
 			e_current_a[a_i]   = e_bar
 		else
-			Vp = lininterp(ap_endo_v, V_endo_v, ap)
+			Vp = Vcont_safe(a_grid, EV_next_a, ap, V_penalty)
 			if !isfinite(Vp) || Vp <= V_penalty
 				V_current_a[a_i]   = V_penalty
 				c_current_a[a_i]   = c_floor
@@ -1049,7 +1141,7 @@ function infertile_step!(
 				e_current_a[a_i]   = e_bar
 				continue
 			end
-			e = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar)
+			e = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar; c_floor = c_floor)
 			if !isfinite(e) || e < e_bar
 				V_current_a[a_i]   = V_penalty
 				c_current_a[a_i]   = c_floor
@@ -1218,7 +1310,7 @@ function fill_EV_Euc!(
 				end
 				Vp = Vt[k]
 				c  = ct[k]
-				if !isfinite(Vp) || Vp <= V_penalty || !isfinite(c) || c <= c_floor
+				if !isfinite(Vp) || Vp <= V_penalty || !isfinite(c) || c < c_floor
 					bad = true
 					break
 				end
@@ -1925,38 +2017,38 @@ simulate_household_panel!(panel, variables, parameters; seed = UInt64(20260118))
 # )
 # savefig(plot_conception_dist_by_age_mixed, string("plot_conception_dist_by_age_mixed.pdf"))
 
-# # infertility risk
-# plot_inf_risk_mixed = plot(
-#     box=:on,
-#     size=[800, 600],
-#     xlim=[18, 54],
-#     xticks=18:3:54,
-#     ylim=[-0.05, 1.05],
-#     xtickfont=font(16, "Computer Modern", :black),
-#     ytickfont=font(16, "Computer Modern", :black),
-#     legendfont=font(16, "Computer Modern", :black),
-#     guidefont=font(18, "Computer Modern", :black),
-#     titlefont=font(18, "Computer Modern", :black),
-#     margin=4mm,
-#     xlabel="Age",
-#     ylabel="Probability"
-# )
-# plot_inf_risk_mixed = scatter!(
-#     parameters.data_age,
-#     parameters.data_inf,
-#     label="Trussell and Wilson (1985)",
-#     markersize=7,
-#     markercolor=:red,
-#     markerstrokewidth=0
-# )
-# plot_inf_risk_mixed = plot!(
-#     parameters.age_min:parameters.age_ret,
-#     parameters.inf_grid[1:(parameters.age_ret-parameters.age_min+1)],
-#     label="Benchmark",
-#     lw=3,
-#     lc=:blue
-# )
-# savefig(plot_inf_risk_mixed, string("plot_inf_risk_data.pdf"))
+# infertility risk
+plot_inf_risk_mixed = plot(
+    box=:on,
+    size=[800, 600],
+    xlim=[18, 54],
+    xticks=18:3:54,
+    ylim=[-0.05, 1.05],
+    xtickfont=font(16, "Computer Modern", :black),
+    ytickfont=font(16, "Computer Modern", :black),
+    legendfont=font(16, "Computer Modern", :black),
+    guidefont=font(18, "Computer Modern", :black),
+    titlefont=font(18, "Computer Modern", :black),
+    margin=4mm,
+    xlabel="Age",
+    ylabel="Probability"
+)
+plot_inf_risk_mixed = scatter!(
+    parameters.data_age,
+    parameters.data_inf,
+    label="Trussell and Wilson (1985)",
+    markersize=7,
+    markercolor=:red,
+    markerstrokewidth=0
+)
+plot_inf_risk_mixed = plot!(
+    parameters.age_min:parameters.age_ret,
+    parameters.inf_grid[1:(parameters.age_ret-parameters.age_min+1)],
+    label="Benchmark",
+    lw=3,
+    lc=:blue
+)
+savefig(plot_inf_risk_mixed, string("plot_inf_risk_data.pdf"))
 
 # plot_inf_risk_mixed = plot(
 #     box=:on,
@@ -2166,6 +2258,10 @@ end
 using DataFrames
 using CategoricalArrays
 using FixedEffectModels
+
+panel_ΔK = panel.ΔK_choice
+panel_K = panel.K_choice
+panel_a = panel.a_state
 
 I, J = size(panel_ΔK)
 panel_dK = panel_ΔK .- panel_K
