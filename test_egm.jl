@@ -157,6 +157,14 @@ end
 # maximize u(c,e)+β*EV_next(ap) over ap in [a_min, M-e_bar-c_floor]
 # where e is solved by your solve_e_bisect (n>0), or e=0 if n=0.
 # -------------------------
+using Optim
+
+# -------------------------
+# Traditional solver at ret-2 for one state (a,n,ϵ,ν):
+# maximize u(c,e)+β*EV_next(ap) over ap in [a_min, M-e_bar-c_floor]
+# with HARD feasibility for continuation value:
+#   ap < ap_floor  -> V_penalty (no interpolation across penalty region)
+# -------------------------
 function opt_state_retminus2(
     M::Float64,
     n::Float64,
@@ -164,63 +172,94 @@ function opt_state_retminus2(
     e_bar::Float64,
     EV_next_a::AbstractVector{Float64},
     parameters;
-    Ngrid::Int=80,  # coarse grid for bracket
-    refine::Bool=true
+    Ngrid::Int=80,
+    refine::Bool=true,
+    # optional: if you also want to require next-period c policy to be valid, pass it in
+    c_next_a::Union{Nothing,AbstractVector{Float64}}=nothing,
 )
     @unpack a_grid, a_min, β, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, ψ, γ, κ, c_floor, V_penalty = parameters
 
-    # feasible upper bound for ap
-    ap_lo = a_min
+    # 1) Upper bound from within-period feasibility
     ap_hi = M - e_bar - c_floor
-    if !(ap_hi > ap_lo) || !isfinite(ap_hi)
+    if !(ap_hi > a_min) || !isfinite(ap_hi)
         return (ok=false, V=V_penalty, c=c_floor, ap=a_min, e=e_bar)
     end
 
-    # helper: continuation value by interpolation on a_grid
+    # 2) Build "valid continuation" mask (match your EGM skipping logic as much as possible)
+    valid = isfinite.(EV_next_a) .& (EV_next_a .> V_penalty)
+    if c_next_a !== nothing
+        valid .&= isfinite.(c_next_a) .& (c_next_a .> c_floor)
+    end
+
+    i0 = findfirst(valid)
+    if i0 === nothing
+        # no feasible continuation anywhere
+        return (ok=false, V=V_penalty, c=c_floor, ap=a_min, e=e_bar)
+    end
+
+    ap_floor = a_grid[i0]
+    # IMPORTANT: effective lower bound is max(a_min, ap_floor)
+    ap_lo = max(a_min, ap_floor)
+
+    if !(ap_hi > ap_lo)
+        return (ok=false, V=V_penalty, c=c_floor, ap=ap_lo, e=e_bar)
+    end
+
+    # 3) Interpolate continuation ONLY on valid tail
+    aV = @view a_grid[i0:end]
+    VV = @view EV_next_a[i0:end]
+
     @inline function Vcont(ap::Float64)
-        Vp = lininterp(a_grid, EV_next_a, ap)
+        # hard cut: do NOT interpolate across penalty region
+        if ap < ap_floor
+            return V_penalty
+        end
+        Vp = lininterp(aV, VV, ap)
         if !isfinite(Vp) || Vp <= V_penalty
             return V_penalty
         end
         return Vp
     end
 
-    # objective in ap (return -Inf for infeasible)
+    # 4) objective in ap (return very negative finite value, avoid -Inf in Brent)
+    NEG = -1.0e300
     function obj(ap::Float64)
         if !(ap_lo <= ap <= ap_hi)
-            return -Inf
+            return NEG
         end
         m = M - ap
+
         if n == 0.0
             c = m
             if !isfinite(c) || c <= c_floor
-                return -Inf
+                return NEG
             end
             Vp = Vcont(ap)
             if Vp <= V_penalty
-                return -Inf
+                return NEG
             end
             return u_CRRA(c, one_m_γ, inv_one_m_γ; c_floor=c_floor, V_penalty=V_penalty) + β*Vp
         else
             if m <= e_bar + c_floor
-                return -Inf
+                return NEG
             end
             e = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar; c_floor=c_floor)
             c = m - e
             if !isfinite(e) || e < e_bar || !isfinite(c) || c <= c_floor
-                return -Inf
+                return NEG
             end
             Vp = Vcont(ap)
             if Vp <= V_penalty
-                return -Inf
+                return NEG
             end
             scale = (n / P)^one_m_κ
-            return u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, scale; c_floor=c_floor, V_penalty=V_penalty) + β*Vp
+            return u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, scale;
+                            c_floor=c_floor, V_penalty=V_penalty) + β*Vp
         end
     end
 
-    # coarse grid search to get a good starting point + bracket
-    bestV = -Inf
+    # 5) coarse grid search
+    bestV  = NEG
     bestap = ap_lo
     for k in 0:Ngrid
         ap = ap_lo + (ap_hi - ap_lo) * (k / Ngrid)
@@ -230,11 +269,11 @@ function opt_state_retminus2(
             bestap = ap
         end
     end
-    if !isfinite(bestV)
-        return (ok=false, V=V_penalty, c=c_floor, ap=a_min, e=e_bar)
+    if !(bestV > V_penalty) || !isfinite(bestV)
+        return (ok=false, V=V_penalty, c=c_floor, ap=ap_lo, e=e_bar)
     end
 
-    # refine using Optim (Brent) on a local bracket around bestap
+    # 6) refine with Brent in a LOCAL bracket (ensure endpoints are feasible-ish)
     ap_star = bestap
     V_star  = bestV
     if refine
@@ -242,13 +281,22 @@ function opt_state_retminus2(
         lo = max(ap_lo, bestap - 5step)
         hi = min(ap_hi, bestap + 5step)
 
-        # maximize obj = minimize -obj
+        # safety: ensure obj(lo), obj(hi) are finite (not NEG)
+        # if not, shrink around bestap until they are
+        for _ in 1:8
+            if obj(lo) > NEG/10 && obj(hi) > NEG/10
+                break
+            end
+            lo = max(ap_lo, bestap - 0.5*(bestap-lo))
+            hi = min(ap_hi, bestap + 0.5*(hi-bestap))
+        end
+
         res = optimize(ap -> -obj(ap), lo, hi, Brent())
         ap_star = Optim.minimizer(res)
         V_star  = -Optim.minimum(res)
     end
 
-    # recover c,e at optimum
+    # 7) recover c,e at optimum
     m = M - ap_star
     if n == 0.0
         c_star = m
@@ -258,8 +306,8 @@ function opt_state_retminus2(
         c_star = m - e_star
     end
 
-    ok = isfinite(V_star) && V_star > V_penalty/2
-    return (ok=ok, V=V_star, c=c_star, ap=ap_star, e=e_star)
+    ok = isfinite(V_star) && (V_star > V_penalty)
+    return (ok=ok, V=V_star, c=c_star, ap=ap_star, e=e_star, ap_floor=ap_floor, ap_lo=ap_lo, ap_hi=ap_hi)
 end
 
 # -------------------------
@@ -543,3 +591,6 @@ out = plot_retminus2_ap_compare(variables, parameters;
     savepath=joinpath(pwd(), "ret2_ap_policy_e4v3_n1.png"), 
     do_display=true
 )
+
+
+

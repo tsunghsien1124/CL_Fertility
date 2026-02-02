@@ -13,6 +13,7 @@ using QuadGK
 # using GLMakie
 # using CairoMakie
 using Polyester
+using Optim
 
 function adda_cooper(N::Integer, ρ::Real, σ::Real; μ::Real = 0.0)
 	"""
@@ -626,6 +627,44 @@ end
 	return nothing
 end
 
+function opt_ap_binding_retired(
+    M::Float64,
+    EV_next_a::AbstractVector{Float64},
+    parameters::NamedTuple;
+    ap_lo::Float64,
+    ap_hi::Float64,
+)
+    @unpack a_grid, β, one_m_γ, inv_one_m_γ, c_floor, V_penalty = parameters
+
+    if !(ap_hi > ap_lo)
+        return (false, NaN, NaN, V_penalty)
+    end
+
+    function obj(ap)
+        if ap < ap_lo || ap > ap_hi
+            return 1e30
+        end
+        c = M - ap
+        if !isfinite(c) || c <= c_floor
+            return 1e30
+        end
+        Vp = lininterp(a_grid, EV_next_a, ap)
+        if !isfinite(Vp) || Vp <= V_penalty
+            return 1e30
+        end
+        val = u_CRRA(c, one_m_γ, inv_one_m_γ; c_floor=c_floor, V_penalty=V_penalty) + β * Vp
+        return -val
+    end
+
+    res = Optim.optimize(obj, ap_lo, ap_hi, Brent())
+    ap  = Optim.minimizer(res)
+    c   = M - ap
+    Vp  = lininterp(a_grid, EV_next_a, ap)
+    val = u_CRRA(c, one_m_γ, inv_one_m_γ; c_floor=c_floor, V_penalty=V_penalty) + β * Vp
+    ok  = isfinite(val) && val > V_penalty
+    return (ok, ap, c, val)
+end
+
 function retired_step!(
 	V_endo::Vector{Float64},
 	a_endo::Vector{Float64},
@@ -689,22 +728,21 @@ function retired_step!(
 	ibind = searchsortedlast(a_grid, a_endo_v[1])
 
 	if ibind > 0
-		ap_floor = ap_endo_v[1]
-		Vp_floor = V_endo_v[1]
 		@inbounds for a_i in 1:ibind
-			aR = aR_grid[a_i]
-			ap = ap_floor
-			c  = aR + w_bar - ap
-
-			if !isfinite(c) || c <= c_floor || !isfinite(Vp_floor) || Vp_floor <= V_penalty
-				a_p_current_a[a_i] = ap
-				c_current_a[a_i]   = c_floor
-				V_current_a[a_i]   = V_penalty
-			else
-				a_p_current_a[a_i] = ap
-				c_current_a[a_i]   = c
-				V_current_a[a_i]   = u_CRRA(c, one_m_γ, inv_one_m_γ; c_floor = c_floor, V_penalty = V_penalty) + β * Vp_floor
-			end
+        	aR = aR_grid[a_i]
+        	M  = aR + w_bar
+        	ap_hi = min(a_grid[end], M - c_floor)
+        	ap_lo = a_min
+        	ok, ap, c, Vnow = opt_ap_binding_retired(M, V_next_a, parameters; ap_lo=ap_lo, ap_hi=ap_hi)
+        	if !ok
+            	a_p_current_a[a_i] = a_min
+            	c_current_a[a_i]   = c_floor
+            	V_current_a[a_i]   = V_penalty
+        	else
+            	a_p_current_a[a_i] = ap
+            	c_current_a[a_i]   = c
+            	V_current_a[a_i]   = Vnow
+        	end
 		end
 	end
 
@@ -787,6 +825,61 @@ end
 		end
 	end
 	return mid
+end
+
+function opt_ap_binding_infertile(
+    M::Float64,
+    n::Float64,
+    P::Float64,
+    e_bar::Float64,
+    EV_next_a::AbstractVector{Float64},
+    parameters::NamedTuple;
+    ap_lo::Float64,
+    ap_hi::Float64,
+)
+    @unpack a_grid, β, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ = parameters
+    @unpack ψ, γ, κ, c_floor, V_penalty = parameters
+
+    if !(ap_hi > ap_lo)
+        return (false, NaN, NaN, NaN, V_penalty)
+    end
+
+    function obj(ap)
+        if ap < ap_lo || ap > ap_hi
+            return 1e30
+        end
+        m = M - ap
+        if m <= e_bar + c_floor
+            return 1e30
+        end
+        e = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar; c_floor=c_floor)
+        if !isfinite(e) || e < e_bar
+            return 1e30
+        end
+        c = m - e
+        if !isfinite(c) || c <= c_floor
+            return 1e30
+        end
+        Vp = lininterp(a_grid, EV_next_a, ap)
+        if !isfinite(Vp) || Vp <= V_penalty
+            return 1e30
+        end
+        val = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, (n/P)^one_m_κ;
+                       c_floor=c_floor, V_penalty=V_penalty) + β * Vp
+        return -val
+    end
+
+    res = Optim.optimize(obj, ap_lo, ap_hi, Brent())
+    ap  = Optim.minimizer(res)
+    m = M - ap
+    e = solve_e_bisect(m, n, P, parameters.ψ, parameters.γ, parameters.κ, parameters.one_m_κ, e_bar; c_floor=parameters.c_floor)
+    c = m - e
+    Vp = lininterp(parameters.a_grid, EV_next_a, ap)
+    val = u_CRRA_e(c, e, parameters.one_m_γ, parameters.inv_one_m_γ, parameters.one_m_κ, parameters.ψ_inv_one_m_κ, (n/P)^parameters.one_m_κ;
+                   c_floor=parameters.c_floor, V_penalty=parameters.V_penalty) + parameters.β * Vp
+
+    ok = isfinite(val) && val > parameters.V_penalty
+    return (ok, ap, c, e, val)
 end
 
 function infertile_step!(
@@ -878,46 +971,25 @@ function infertile_step!(
 	ibind = searchsortedlast(a_grid, a_endo_v[1])
 
 	if ibind > 0
-		ap_floor = ap_endo_v[1]
-		Vp_floor = V_endo_v[1]
-		@inbounds for a_i in 1:ibind
-			aR = aR_grid[a_i]
-			M  = aR + w_bar
-			ap = ap_floor
-			m  = M - ap
+    	@inbounds for a_i in 1:ibind
+        	aR = aR_grid[a_i]
+        	M  = aR + w_bar
+        	ap_hi = min(a_grid[end], M - (e_bar + c_floor))
+        	ap_lo = a_min
+        	ok, ap, c, e, Vnow = opt_ap_binding_infertile(M, n, P, e_bar, V_next_a, parameters; ap_lo=ap_lo, ap_hi=ap_hi)
 
-			if !isfinite(Vp_floor) || Vp_floor <= V_penalty || m <= e_bar + c_floor
-				V_current_a[a_i]   = V_penalty
-				c_current_a[a_i]   = c_floor
-				a_p_current_a[a_i] = ap
-				e_current_a[a_i]   = e_bar
-				continue
-			end
-
-			e = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar)
-			if !isfinite(e) || e < e_bar
-				V_current_a[a_i]   = V_penalty
-				c_current_a[a_i]   = c_floor
-				a_p_current_a[a_i] = ap
-				e_current_a[a_i]   = e_bar
-				continue
-			end
-
-			c = m - e
-			if !isfinite(c) || c <= c_floor
-				V_current_a[a_i]   = V_penalty
-				c_current_a[a_i]   = c_floor
-				a_p_current_a[a_i] = ap
-				e_current_a[a_i]   = e_bar
-				continue
-			end
-
-			V_current_a[a_i]   = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, scale;
-			c_floor = c_floor, V_penalty = V_penalty) + β * Vp_floor
-			c_current_a[a_i]   = c
-			a_p_current_a[a_i] = ap
-			e_current_a[a_i]   = e
-		end
+        	if !ok
+            	V_current_a[a_i]   = V_penalty
+            	c_current_a[a_i]   = c_floor
+            	a_p_current_a[a_i] = a_min
+            	e_current_a[a_i]   = e_bar
+        	else
+            	V_current_a[a_i]   = Vnow
+            	c_current_a[a_i]   = c
+            	a_p_current_a[a_i] = ap
+            	e_current_a[a_i]   = e
+        	end
+    	end
 	end
 
 	@inbounds for a_i in (ibind+1):a_size

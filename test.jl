@@ -19,8 +19,8 @@ plot!(new["parameters"].a_grid, new["policy_a_p"][:,n_ind,ϵ_ind,ν_ind,inf_ind,
 plot(old["parameters"].a_grid, old["V"][:,n_ind,ϵ_ind,ν_ind,inf_ind,age_ret_ind], label="old")
 plot!(new["parameters"].a_grid, new["V"][:,n_ind,ϵ_ind,ν_ind,inf_ind,age_ret_ind], label="new")
 
-n_ind = 2
-ϵ_ind = 4
+n_ind = 4
+ϵ_ind = 1
 ν_ind = 3
 inf_ind = 2
 # age_inf_ind = old["parameters"].age_inf - old["parameters"].age_min + 1
