@@ -640,17 +640,16 @@ function opt_ap_binding_retired(
         return (false, NaN, NaN, V_penalty)
     end
 
+    PEN = 1e30
+
     function obj(ap)
-        if ap < ap_lo || ap > ap_hi
-            return 1e30
-        end
         c = M - ap
         if !isfinite(c) || c <= c_floor
-            return 1e30
+            return PEN
         end
         Vp = lininterp(a_grid, EV_next_a, ap)
         if !isfinite(Vp) || Vp <= V_penalty
-            return 1e30
+            return PEN
         end
         val = u_CRRA(c, one_m_γ, inv_one_m_γ; c_floor=c_floor, V_penalty=V_penalty) + β * Vp
         return -val
@@ -661,7 +660,11 @@ function opt_ap_binding_retired(
     c   = M - ap
     Vp  = lininterp(a_grid, EV_next_a, ap)
     val = u_CRRA(c, one_m_γ, inv_one_m_γ; c_floor=c_floor, V_penalty=V_penalty) + β * Vp
-    ok  = isfinite(val) && val > V_penalty
+
+    ok = isfinite(val) && val > V_penalty &&
+         isfinite(Vp)  && Vp  > V_penalty &&
+         isfinite(c)   && c   > c_floor
+
     return (ok, ap, c, val)
 end
 
@@ -774,57 +777,70 @@ end
 @inline g_eval(e::Float64, m::Float64, A::Float64, γ::Float64, κ::Float64) = A * e^(-κ) - (m - e)^(-γ)
 
 @inline function solve_e_bisect(
-	m::Float64,
-	n::Float64,
-	P::Float64,
-	ψ::Float64,
-	γ::Float64,
-	κ::Float64,
-	one_m_κ::Float64,
-	e_bar::Float64;
-	c_floor::Float64 = 1e-12,
-	maxit::Int64 = 80,
-	tol::Float64 = 1e-12,
+    m::Float64,
+    n::Float64,
+    P::Float64,
+    ψ::Float64,
+    γ::Float64,
+    κ::Float64,
+    one_m_κ::Float64,
+    e_bar::Float64;
+    c_floor::Float64 = 1e-12,
+    maxit::Int64 = 80,
+    tol::Float64 = 1e-12,
 )::Float64
 
-	# auxiliary parameter
-	A = ψ * (n / P)^one_m_κ
+    # feasibility upper bound for e given c >= c_floor
+    e_hi = m - c_floor
+    if !isfinite(e_hi) || e_hi <= e_bar
+        # infeasible: cannot satisfy e >= e_bar and c >= c_floor simultaneously
+        return NaN
+    end
 
-	# check feasibility
-	e_hi = m - c_floor
-	if e_hi < e_bar
-		return e_hi
-	end
+    # auxiliary parameter
+    A = ψ * (n / P)^one_m_κ
+    if !isfinite(A) || A <= 0.0
+        return NaN
+    end
 
-	# Check lower bound (constraint) corner: if g(e_bar) <= 0, optimum at e = e_bar
-	gl = g_eval(e_bar, m, A, γ, κ)
-	if gl <= 0.0
-		return e_bar
-	end
+    # lower bound corner: if g(e_bar) <= 0 => optimum at e = e_bar
+    gl = g_eval(e_bar, m, A, γ, κ)
+    if !isfinite(gl)
+        return NaN
+    end
+    if gl <= 0.0
+        return e_bar
+    end
 
-	# Check upper bound corner: if g(e_hi) >= 0, utility still wants more e -> choose e_hi
-	gh = g_eval(e_hi, m, A, γ, κ)
-	if gh >= 0.0
-		return e_hi
-	end
+    # upper bound corner: if g(e_hi) >= 0 => utility wants more e => choose e_hi
+    gh = g_eval(e_hi, m, A, γ, κ)
+    if !isfinite(gh)
+        return NaN
+    end
+    if gh >= 0.0
+        return e_hi
+    end
 
-	# Now we have g(e_min) > 0 and g(e_hi) < 0 -> unique root inside (e_min, e_hi)
-	lo = e_bar
-	hi = e_hi
-	mid = 0.5 * (lo + hi)
-	@inbounds for _ in 1:maxit
-		mid = 0.5 * (lo + hi)
-		gm = g_eval(mid, m, A, γ, κ)
-		if abs(gm) <= tol || (hi - lo) <= tol * (1.0 + mid)
-			return mid
-		end
-		if gm > 0.0
-			lo = mid
-		else
-			hi = mid
-		end
-	end
-	return mid
+    # unique root in (e_bar, e_hi)
+    lo = e_bar
+    hi = e_hi
+    mid = 0.5 * (lo + hi)
+    @inbounds for _ in 1:maxit
+        mid = 0.5 * (lo + hi)
+        gm = g_eval(mid, m, A, γ, κ)
+        if !isfinite(gm)
+            return NaN
+        end
+        if abs(gm) <= tol || (hi - lo) <= tol * (1.0 + mid)
+            return mid
+        end
+        if gm > 0.0
+            lo = mid
+        else
+            hi = mid
+        end
+    end
+    return mid
 end
 
 function opt_ap_binding_infertile(
@@ -844,41 +860,62 @@ function opt_ap_binding_infertile(
         return (false, NaN, NaN, NaN, V_penalty)
     end
 
+    PEN   = 1e30
+    scale = (n / P)^one_m_κ
+
     function obj(ap)
         if ap < ap_lo || ap > ap_hi
-            return 1e30
+            return PEN
         end
+
         m = M - ap
-        if m <= e_bar + c_floor
-            return 1e30
+        if !isfinite(m) || m <= e_bar + c_floor
+            return PEN
         end
-        e = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar; c_floor=c_floor)
-        if !isfinite(e) || e < e_bar
-            return 1e30
-        end
-        c = m - e
-        if !isfinite(c) || c <= c_floor
-            return 1e30
-        end
+
         Vp = lininterp(a_grid, EV_next_a, ap)
         if !isfinite(Vp) || Vp <= V_penalty
-            return 1e30
+            return PEN
         end
-        val = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, (n/P)^one_m_κ;
+
+        e = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar; c_floor=c_floor)
+        if !isfinite(e)
+            return PEN
+        end
+        if e < e_bar
+            e = e_bar
+        end
+
+        c = m - e
+        if !isfinite(c) || c <= c_floor
+            return PEN
+        end
+
+        val = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, scale;
                        c_floor=c_floor, V_penalty=V_penalty) + β * Vp
         return -val
     end
 
     res = Optim.optimize(obj, ap_lo, ap_hi, Brent())
     ap  = Optim.minimizer(res)
-    m = M - ap
-    e = solve_e_bisect(m, n, P, parameters.ψ, parameters.γ, parameters.κ, parameters.one_m_κ, e_bar; c_floor=parameters.c_floor)
-    c = m - e
-    Vp = lininterp(parameters.a_grid, EV_next_a, ap)
-    val = u_CRRA_e(c, e, parameters.one_m_γ, parameters.inv_one_m_γ, parameters.one_m_κ, parameters.ψ_inv_one_m_κ, (n/P)^parameters.one_m_κ;
-                   c_floor=parameters.c_floor, V_penalty=parameters.V_penalty) + parameters.β * Vp
 
-    ok = isfinite(val) && val > parameters.V_penalty
+    m  = M - ap
+    Vp = lininterp(a_grid, EV_next_a, ap)
+    e  = solve_e_bisect(m, n, P, ψ, γ, κ, one_m_κ, e_bar; c_floor=c_floor)
+    if isfinite(e) && e < e_bar
+        e = e_bar
+    end
+    c  = m - e
+
+    val = u_CRRA_e(c, e, one_m_γ, inv_one_m_γ, one_m_κ, ψ_inv_one_m_κ, scale;
+                   c_floor=c_floor, V_penalty=V_penalty) + β * Vp
+
+    ok = isfinite(val) && val > V_penalty &&
+         isfinite(Vp)  && Vp  > V_penalty &&
+         isfinite(m)   && m   > e_bar + c_floor &&
+         isfinite(e)   && e   >= e_bar &&
+         isfinite(c)   && c   > c_floor
+
     return (ok, ap, c, e, val)
 end
 
