@@ -150,9 +150,9 @@ function parameters_function(;
     r::Real=0.04,                   # interest rate
     β::Real=1.0 / (1.0 + r),        # discount factor
     γ::Real=1.5,                    # risk aversion
-    ρ::Real=0.95,                   # persistance coefficient
-    σ_ϵ::Real=0.21,                 # std of persistent shock
-    σ_ν::Real=0.17,                 # std of transitory shock
+    ρ::Real=0.995,                  # persistance coefficient
+    σ_ϵ::Real=0.036,                 # std of persistent shock
+    σ_ν::Real=0.413,                 # std of transitory shock
     b::Real=0.40,                   # replacement rate
     #----------------------#
     # estimated parameters #
@@ -161,7 +161,7 @@ function parameters_function(;
     ψ::Real=3.50,                   # preference scale
     μ::Real=0.35,                   # production share
     θ::Real=0.70,                   # elasticity of substitution in production
-    q_bar::Real=0.50,               # lower bound on children's consumption
+    q_bar::Real=0.35,               # lower bound on children's consumption
     ψ_1::Real=0.91,                 # HH economies to money input to production
     ψ_2::Real=0.54,                 # HH economies to time input to production
     p::Real=0.02,                   # prob that a child becomes independent
@@ -175,10 +175,10 @@ function parameters_function(;
     age_ret::Integer=65,            # retirement age
     n_max::Integer=4,               # max number of kids
     ϵ_size::Integer=7,              # number of persistent shock
-    ν_size::Integer=5,              # number of transitory shock
+    ν_size::Integer=7,              # number of transitory shock
     a_min::Real=0.0,                # min of asset holding
-    a_max::Real=120,                # max of asset holding
-    a_size::Integer=250,            # number of asset
+    a_max::Real=100,                # max of asset holding
+    a_size::Integer=100,            # number of asset
     a_degree::Integer=1,            # curvature of asset gridpoints
     q_x::Real=1.0,                  # price of monetary input $x$
 
@@ -227,7 +227,7 @@ function parameters_function(;
         10.164399, 10.186016, 10.153089, 10.128997, 10.122162,
         10.081263, 10.121118, 10.059273, 10.015279, 9.950545,
         9.838649, 9.781660, 9.637810,
-    ]    
+    ]
 
     data_h_C = [
         9.428264, 9.767262, 10.091448, 10.258264, 10.360586,
@@ -259,6 +259,8 @@ function parameters_function(;
         h_grid = vcat(h_grid, repeat([h_grid[end]], age_max - age_ret))
         h_size = length(h_grid)
         @assert age_size == h_size
+        σ_ϵ = 0.120
+        σ_ν = 0.298
     end
 
     # persistent income shock
@@ -297,7 +299,12 @@ function parameters_function(;
         ν = ν_grid[ν_i]
         ϵ = ϵ_grid[ϵ_i]
         ret_idx = age_ret - age_min + 1
-        w_grid[ϵ_i, ν_i, h_i] = h_i < ret_idx ? exp(h + ν + ϵ) : b * exp(h + ν + ϵ)
+        if edu_ind == :C && 1 ≤ h_i ≤ 4
+            h = h - log(10_000)
+            w_grid[ϵ_i, ν_i, h_i] = h_i < ret_idx ? exp(h + ν + ϵ) : b * exp(h + ν + ϵ)
+        else
+            w_grid[ϵ_i, ν_i, h_i] = h_i < ret_idx ? exp(h + ν + ϵ) : b * exp(h + ν + ϵ)
+        end
     end
 
     P_grid = Array{Float64}(undef, n_size, ϵ_size, ν_size, h_size)
@@ -1605,9 +1612,84 @@ simulate_household_panel!(panel_NC, vars_NC, params_NC; seed=UInt64(1))
 panel_C = initialize_panel(num_households=300_000, num_periods=params_C.age_size)
 simulate_household_panel!(panel_C, vars_C, params_C; seed=UInt64(2))
 
-mean_K_NC = vec(mean(panel_NC.K_choice, dims=2))
-mean_K_C  = vec(mean(panel_C.K_choice, dims=2))
-plot(params_NC.age_grid, mean_K_NC, label="NC", lw=2)
-plot!(params_C.age_grid, mean_K_C, label="C", lw=2,
-    xlabel="Age", ylabel="Cumulative fertility")
+mean_K_NC = vec(mean(panel_NC.K_choice, dims=2)) .* 1000
+mean_K_C  = vec(mean(panel_C.K_choice, dims=2)) .* 1000
 
+fertile_NC = 1:(params_NC.age_inf - params_NC.age_min + 1)
+fertile_C  = 1:(params_C.age_inf - params_C.age_min + 1)
+
+plot(params_NC.age_grid[fertile_NC], mean_K_NC[fertile_NC], label="NC", lw=2)
+plot!(params_C.age_grid[fertile_C], mean_K_C[fertile_C], label="C", lw=2,
+    xlabel="Age", ylabel="Births per 1,000 women")
+
+ret_NC = params_NC.age_ret - params_NC.age_min + 1
+ret_C  = params_C.age_ret - params_C.age_min + 1
+
+# distribution of max children at home up to retirement
+n_max_NC = [maximum(params_NC.n_grid[panel_NC.n_state[1:ret_NC, h]]) for h in 1:size(panel_NC.n_state, 2)]
+n_max_C  = [maximum(params_C.n_grid[panel_C.n_state[1:ret_C, h]]) for h in 1:size(panel_C.n_state, 2)]
+
+for k in 0:params_NC.n_max
+    println("NC: max n=$k — $(round(mean(n_max_NC .== k)*100, digits=1))%")
+end
+for k in 0:params_C.n_max
+    println("C:  max n=$k — $(round(mean(n_max_C .== k)*100, digits=1))%")
+end
+
+# mean children at home by age, up to retirement
+mean_n_NC = vec(mean(params_NC.n_grid[panel_NC.n_state[1:ret_NC, :]], dims=2))
+mean_n_C  = vec(mean(params_C.n_grid[panel_C.n_state[1:ret_C, :]], dims=2))
+plot(params_NC.age_grid[1:ret_NC], mean_n_NC, label="NC", lw=2)
+plot!(params_C.age_grid[1:ret_C], mean_n_C, label="C", lw=2,
+    xlabel="Age", ylabel="Mean children at home")
+
+mid_ϵ = (params_NC.ϵ_size + 1) ÷ 2
+mid_ν = (params_NC.ν_size + 1) ÷ 2
+
+for age_i in 1:(params_NC.age_inf - params_NC.age_min)
+    w = params_NC.w_grid[mid_ϵ, mid_ν, age_i]
+    for n in 0:3
+        n_i = n + 1
+        P = params_NC.P_grid[n_i, mid_ϵ, mid_ν, age_i]
+        e_bar = params_NC.q_bar_P_grid[n_i, mid_ϵ, mid_ν, age_i]
+        if n == 0
+            print("Age $(params_NC.age_grid[age_i]): w=$(round(w,digits=3)) | ")
+        end
+        print("n=$n: e_bar=$(round(e_bar,digits=3)) ($(round(100*e_bar/w,digits=1))%) | ")
+    end
+    println()
+end
+
+# at a representative state
+age_i = 10  # around age 28
+a_i = params_NC.a_size ÷ 2  # middle wealth
+
+V_n0 = vars_NC.V[a_i, 1, mid_ϵ, mid_ν, 1, age_i]  # 0 kids
+V_n1 = vars_NC.V[a_i, 2, mid_ϵ, mid_ν, 1, age_i]  # 1 kid
+V_n2 = vars_NC.V[a_i, 3, mid_ϵ, mid_ν, 1, age_i]  # 2 kids
+
+println("V(n=0) = $V_n0")
+println("V(n=1) = $V_n1")
+println("V(n=2) = $V_n2")
+println("Gain from 1st child: $(V_n1 - V_n0)")
+println("Gain from 2nd child: $(V_n2 - V_n1)")
+
+mean_K_NC = vec(mean(panel_NC.K_choice, dims=2))
+cum_K_NC = cumsum(mean_K_NC)
+mean_K_C = vec(mean(panel_C.K_choice, dims=2))
+cum_K_C = cumsum(mean_K_C)
+
+fertile_NC = 1:(params_NC.age_inf - params_NC.age_min + 1)
+fertile_C  = 1:(params_C.age_inf - params_C.age_min + 1)
+
+plot(params_NC.age_grid[fertile_NC], cum_K_NC[fertile_NC],
+    label="Non-college", lw=2.5, lc=:blue, ls=:solid,
+    xlabel="Age",
+    ylabel="Cumulative average number of births",
+    legend=:topleft,
+    xlim=[18, 45],
+    xticks=18:2:46,
+)
+plot!(params_C.age_grid[fertile_C], cum_K_C[fertile_C],
+    label="College", lw=2.5, lc=:red, ls=:dash,
+)
