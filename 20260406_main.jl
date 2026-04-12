@@ -4,7 +4,7 @@ using Plots
 using Parameters: @unpack
 using QuantEcon: tauchen, stationary_distributions, MarkovChain, Categorical
 using LaTeXStrings
-using Measures
+# using Measures
 using JLD2: @save, @load
 using Random
 using FreqTables
@@ -73,7 +73,7 @@ end
 function binomial_matrix_function(n_max::Integer, p::Real)
     """
     Construct transition matrix of dependent children (up to n_max)
-    	n_max - largest numder of children considerd
+    	n_max - largest number of children considerd
     	p     - probability that a child becomes independent
     """
     Π_n = zeros(1 + n_max, 1 + n_max)
@@ -89,7 +89,7 @@ end
 
 function infertility_risk_function(data_age::Array{Int64,1}, data_inf::Array{Float64,1}, age_min::Integer, age_max::Integer, age_inf::Integer)
     """
-    Exponential fit of infertility probability, intrapolated on ages up to age_inf
+    Exponential fit of infertility probability, interpolated on ages up to age_inf
     """
     model(t, ω) = ω[1] * exp.(ω[2] * t)
     ω_int = [0.5, 0.5]
@@ -102,7 +102,7 @@ end
 
 function infertility_risk_low_function(data_age::Array{Int64,1}, data_inf::Array{Float64,1}, age_min::Integer, age_max::Integer)
     """
-    Exponential fit of infertility probability, intrapolated on ages up to age_inf
+    Exponential fit of infertility probability, interpolated on ages up to age_inf
     """
     model(t, ω) = ω[1] * exp.(ω[2] * t)
     ω_int = [0.5, 0.5]
@@ -129,19 +129,19 @@ end
     return log(c)
 end
 
-function quality_function(x::Real, l::Real, n::Integer, μ::Real, θ::Real, ψ_1::Real, ψ_2::Real)
-    """
-    child quality function
-    	x - time input
-    	l - monetary input
-    	n - number of kids
-    """
-    if n > 0
-        return (μ * (x / (n^ψ_1))^θ + (1.0 - μ) * (l / (n^ψ_2))^θ)^(1.0 / θ)
-    else
-        return 0.0
-    end
-end
+# function quality_function(x::Real, l::Real, n::Integer, μ::Real, θ::Real, ψ_1::Real, ψ_2::Real)
+#     """
+#     child quality function
+#     	x - time input
+#     	l - monetary input
+#     	n - number of kids
+#     """
+#     if n > 0
+#         return (μ * (x / (n^ψ_1))^θ + (1.0 - μ) * (l / (n^ψ_2))^θ)^(1.0 / θ)
+#     else
+#         return 0.0
+#     end
+# end
 
 function parameters_function(;
     #----------------------#
@@ -165,6 +165,7 @@ function parameters_function(;
     ψ_1::Real=0.91,                 # HH economies to money input to production
     ψ_2::Real=0.54,                 # HH economies to time input to production
     p::Real=0.02,                   # prob that a child becomes independent
+    φ_K::Real=0.0,                  # fixed cost of giving birth
 
     # numerical solution #
 
@@ -177,7 +178,7 @@ function parameters_function(;
     ϵ_size::Integer=7,              # number of persistent shock
     ν_size::Integer=7,              # number of transitory shock
     a_min::Real=0.0,                # min of asset holding
-    a_max::Real=100,                # max of asset holding
+    a_max::Real=100,               # max of asset holding
     a_size::Integer=100,            # number of asset
     a_degree::Integer=1,            # curvature of asset gridpoints
     q_x::Real=1.0,                  # price of monetary input $x$
@@ -186,7 +187,7 @@ function parameters_function(;
     edu_ind::Symbol=:NC,          # with or without education
 )
     """
-    Contruct an immutable object containg all paramters
+    Construct an immutable object containg all parameters
     """
 
     # auxiliary parameters
@@ -240,6 +241,7 @@ function parameters_function(;
         10.945880, 10.893451, 10.880835, 10.917661, 10.824608,
         10.808046, 10.612711, 10.541795, 10.430953,
     ]
+    data_h_C[1:4] .= log.(exp.(data_h_C[1:4]) .- 10_000)
     h_mean = mean(data_h_NC)
 
     if edu_ind == :NC
@@ -299,12 +301,7 @@ function parameters_function(;
         ν = ν_grid[ν_i]
         ϵ = ϵ_grid[ϵ_i]
         ret_idx = age_ret - age_min + 1
-        if edu_ind == :C && 1 ≤ h_i ≤ 4
-            h = h - log(10_000)
-            w_grid[ϵ_i, ν_i, h_i] = h_i < ret_idx ? exp(h + ν + ϵ) : b * exp(h + ν + ϵ)
-        else
-            w_grid[ϵ_i, ν_i, h_i] = h_i < ret_idx ? exp(h + ν + ϵ) : b * exp(h + ν + ϵ)
-        end
+        w_grid[ϵ_i, ν_i, h_i] = h_i < ret_idx ? exp(h + ν + ϵ) : b * exp(h + ν + ϵ)
     end
 
     P_grid = Array{Float64}(undef, n_size, ϵ_size, ν_size, h_size)
@@ -365,6 +362,7 @@ function parameters_function(;
         ψ_1=ψ_1,
         ψ_2=ψ_2,
         p=p,
+        φ_K=φ_K,
         age_min=age_min,
         age_max=age_max,
         age_edu=age_edu,
@@ -1076,6 +1074,10 @@ function fertile_step!(
     e_bar::Float64,
     n::Float64,
 )
+
+    @unpack φ_K = parameters
+    w_bar_K = w_bar - φ_K
+
     fill!(K_current_a, 0.0)
 
     if n == 0.0
@@ -1086,7 +1088,7 @@ function fertile_step!(
         retired_step!(V_endo, a_endo, ap_endo,
             V_next_aK, c_next_aK,
             V1, c1, ap1,
-            parameters, w_bar)
+            parameters, w_bar_K)
         @inbounds for i in eachindex(V_current_a)
             if V1[i] > V_current_a[i]
                 V_current_a[i] = V1[i]
@@ -1103,7 +1105,7 @@ function fertile_step!(
         infertile_step!(V_endo, a_endo, ap_endo,
             V_next_aK, c_next_aK,
             V1, c1, ap1, e1,
-            parameters, w_bar, P, e_bar, n)
+            parameters, w_bar_K, P, e_bar, n)
         @inbounds for i in eachindex(V_current_a)
             if V1[i] > V_current_a[i]
                 V_current_a[i] = V1[i]
@@ -1448,19 +1450,15 @@ function save_JLD_function!(variables::Mutable_Variables, parameters::NamedTuple
 end
 
 # solve stationary equilibrium #
-
-params_NC = parameters_function(edu_ind=:NC)
+params_NC = parameters_function(edu_ind=:NC, φ_K=1.5)
 vars_NC = variables_function(params_NC)
 solve_value_and_policy_function!(vars_NC, params_NC)
-# save_JLD_function!(vars_NC, params_NC, filename="workspace_benchmark_C.jld2")
 
-params_C = parameters_function(edu_ind=:C)
+params_C = parameters_function(edu_ind=:C, φ_K=1.5)
 vars_C = variables_function(params_C)
 solve_value_and_policy_function!(vars_C, params_C)
-# save_JLD_function!(vars_C, params_C, filename="workspace_benchmark_NC.jld2")
 
-# simuation #
-
+# simulation #
 using Random
 using Random123
 using QuantEcon: Categorical
@@ -1613,21 +1611,21 @@ panel_C = initialize_panel(num_households=300_000, num_periods=params_C.age_size
 simulate_household_panel!(panel_C, vars_C, params_C; seed=UInt64(2))
 
 mean_K_NC = vec(mean(panel_NC.K_choice, dims=2)) .* 1000
-mean_K_C  = vec(mean(panel_C.K_choice, dims=2)) .* 1000
+mean_K_C = vec(mean(panel_C.K_choice, dims=2)) .* 1000
 
-fertile_NC = 1:(params_NC.age_inf - params_NC.age_min + 1)
-fertile_C  = 1:(params_C.age_inf - params_C.age_min + 1)
+fertile_NC = 1:(params_NC.age_inf-params_NC.age_min+1)
+fertile_C = 1:(params_C.age_inf-params_C.age_min+1)
 
 plot(params_NC.age_grid[fertile_NC], mean_K_NC[fertile_NC], label="NC", lw=2)
 plot!(params_C.age_grid[fertile_C], mean_K_C[fertile_C], label="C", lw=2,
     xlabel="Age", ylabel="Births per 1,000 women")
 
 ret_NC = params_NC.age_ret - params_NC.age_min + 1
-ret_C  = params_C.age_ret - params_C.age_min + 1
+ret_C = params_C.age_ret - params_C.age_min + 1
 
 # distribution of max children at home up to retirement
 n_max_NC = [maximum(params_NC.n_grid[panel_NC.n_state[1:ret_NC, h]]) for h in 1:size(panel_NC.n_state, 2)]
-n_max_C  = [maximum(params_C.n_grid[panel_C.n_state[1:ret_C, h]]) for h in 1:size(panel_C.n_state, 2)]
+n_max_C = [maximum(params_C.n_grid[panel_C.n_state[1:ret_C, h]]) for h in 1:size(panel_C.n_state, 2)]
 
 for k in 0:params_NC.n_max
     println("NC: max n=$k — $(round(mean(n_max_NC .== k)*100, digits=1))%")
@@ -1638,7 +1636,7 @@ end
 
 # mean children at home by age, up to retirement
 mean_n_NC = vec(mean(params_NC.n_grid[panel_NC.n_state[1:ret_NC, :]], dims=2))
-mean_n_C  = vec(mean(params_C.n_grid[panel_C.n_state[1:ret_C, :]], dims=2))
+mean_n_C = vec(mean(params_C.n_grid[panel_C.n_state[1:ret_C, :]], dims=2))
 plot(params_NC.age_grid[1:ret_NC], mean_n_NC, label="NC", lw=2)
 plot!(params_C.age_grid[1:ret_C], mean_n_C, label="C", lw=2,
     xlabel="Age", ylabel="Mean children at home")
@@ -1646,7 +1644,7 @@ plot!(params_C.age_grid[1:ret_C], mean_n_C, label="C", lw=2,
 mid_ϵ = (params_NC.ϵ_size + 1) ÷ 2
 mid_ν = (params_NC.ν_size + 1) ÷ 2
 
-for age_i in 1:(params_NC.age_inf - params_NC.age_min)
+for age_i in 1:(params_NC.age_inf-params_NC.age_min)
     w = params_NC.w_grid[mid_ϵ, mid_ν, age_i]
     for n in 0:3
         n_i = n + 1
@@ -1679,8 +1677,8 @@ cum_K_NC = cumsum(mean_K_NC)
 mean_K_C = vec(mean(panel_C.K_choice, dims=2))
 cum_K_C = cumsum(mean_K_C)
 
-fertile_NC = 1:(params_NC.age_inf - params_NC.age_min + 1)
-fertile_C  = 1:(params_C.age_inf - params_C.age_min + 1)
+fertile_NC = 1:(params_NC.age_inf-params_NC.age_min+1)
+fertile_C = 1:(params_C.age_inf-params_C.age_min+1)
 
 plot(params_NC.age_grid[fertile_NC], cum_K_NC[fertile_NC],
     label="Non-college", lw=2.5, lc=:blue, ls=:solid,
