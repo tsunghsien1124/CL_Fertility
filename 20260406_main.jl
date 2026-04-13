@@ -11,7 +11,7 @@ using FreqTables
 using BenchmarkTools
 using QuadGK
 # using GLMakie
-# using CairoMakie
+using CairoMakie
 using Polyester
 using Optim
 using StatsPlots
@@ -178,9 +178,9 @@ function parameters_function(;
     ϵ_size::Integer=7,              # number of persistent shock
     ν_size::Integer=7,              # number of transitory shock
     a_min::Real=0.0,                # min of asset holding
-    a_max::Real=100,               # max of asset holding
-    a_size::Integer=100,            # number of asset
-    a_degree::Integer=1,            # curvature of asset gridpoints
+    a_max::Real=80,                 # max of asset holding
+    a_size::Integer=200,            # number of asset
+    a_degree::Integer=2,            # curvature of asset gridpoints
     q_x::Real=1.0,                  # price of monetary input $x$
 
     # case indicators #
@@ -1450,13 +1450,15 @@ function save_JLD_function!(variables::Mutable_Variables, parameters::NamedTuple
 end
 
 # solve stationary equilibrium #
-params_NC = parameters_function(edu_ind=:NC, φ_K=1.5)
+params_NC = parameters_function(edu_ind=:NC, φ_K=0.5)
 vars_NC = variables_function(params_NC)
 solve_value_and_policy_function!(vars_NC, params_NC)
 
-params_C = parameters_function(edu_ind=:C, φ_K=1.5)
+params_C = parameters_function(edu_ind=:C, φ_K=0.5)
 vars_C = variables_function(params_C)
 solve_value_and_policy_function!(vars_C, params_C)
+
+save_phik = "cum_births_phik_0.5.pdf"
 
 # simulation #
 using Random
@@ -1525,6 +1527,7 @@ function simulate_household_panel!(
     variables::Mutable_Variables,
     parameters::NamedTuple;
     seed::UInt64=UInt64(1124),
+    Δ_a::Int=1,
 )
     @unpack a_grid, a_ind_zero, a_size, ϵ_size, n_size, n_Γ, ϵ_Γ, ϵ_G, ν_Γ, inf_grid, age_ret, age_inf, age_min, p_fertile_at_entry = parameters
 
@@ -1569,7 +1572,7 @@ function simulate_household_panel!(
             K01 = (K_raw >= 0.5) ? Int8(1) : Int8(0)
             panel.K_choice[t, h] = K01
 
-            Δa_i = a_i != a_size ? a_i + 1 : a_size
+            Δa_i = min(a_i + Δ_a, a_size)
             ΔK_raw = variables.policy_K[Δa_i, n_i, ϵ_i, ν_i, f_i, t]
             ΔK01 = (ΔK_raw >= 0.5) ? Int8(1) : Int8(0)
             panel.ΔK_choice[t, h] = ΔK01
@@ -1600,15 +1603,29 @@ function simulate_household_panel!(
                 panel.f_state[t+1, h] = 2
             end
         end
+        # fill in last period choices
+        let t = T
+            a_i = panel.a_state[t, h]
+            n_i = panel.n_state[t, h]
+            ϵ_i = panel.ϵ_state[t, h]
+            ν_i = panel.ν_state[t, h]
+            f_i = panel.f_state[t, h]
+            panel.c_choice[t, h] = variables.policy_c[a_i, n_i, ϵ_i, ν_i, f_i, t]
+            panel.e_choice[t, h] = variables.policy_e[a_i, n_i, ϵ_i, ν_i, f_i, t]
+            K_raw = variables.policy_K[a_i, n_i, ϵ_i, ν_i, f_i, t]
+            panel.K_choice[t, h] = (K_raw >= 0.5) ? Int8(1) : Int8(0)
+        end
     end
     return nothing
 end
 
+Δ_a_given = 1
+
 panel_NC = initialize_panel(num_households=300_000, num_periods=params_NC.age_size)
-simulate_household_panel!(panel_NC, vars_NC, params_NC; seed=UInt64(1))
+simulate_household_panel!(panel_NC, vars_NC, params_NC; seed=UInt64(1), Δ_a=Δ_a_given)
 
 panel_C = initialize_panel(num_households=300_000, num_periods=params_C.age_size)
-simulate_household_panel!(panel_C, vars_C, params_C; seed=UInt64(2))
+simulate_household_panel!(panel_C, vars_C, params_C; seed=UInt64(2), Δ_a=Δ_a_given)
 
 mean_K_NC = vec(mean(panel_NC.K_choice, dims=2)) .* 1000
 mean_K_C = vec(mean(panel_C.K_choice, dims=2)) .* 1000
@@ -1616,9 +1633,21 @@ mean_K_C = vec(mean(panel_C.K_choice, dims=2)) .* 1000
 fertile_NC = 1:(params_NC.age_inf-params_NC.age_min+1)
 fertile_C = 1:(params_C.age_inf-params_C.age_min+1)
 
-plot(params_NC.age_grid[fertile_NC], mean_K_NC[fertile_NC], label="NC", lw=2)
-plot!(params_C.age_grid[fertile_C], mean_K_C[fertile_C], label="C", lw=2,
-    xlabel="Age", ylabel="Births per 1,000 women")
+fig = Figure(size=(600, 400), fontsize=18)
+ax = Axis(fig[1, 1],
+    xlabel="Age",
+    ylabel="Births per 1,000 women",
+    xticks=18:2:46,
+)
+
+lines!(ax, params_NC.age_grid[fertile_NC], mean_K_NC[fertile_NC],
+    linewidth=2, color=:blue, label="NC")
+lines!(ax, params_C.age_grid[fertile_C], mean_K_C[fertile_C],
+    linewidth=2, color=:red, linestyle=:dashdot, label="C")
+
+axislegend(ax, position=:rt)
+
+fig
 
 ret_NC = params_NC.age_ret - params_NC.age_min + 1
 ret_C = params_C.age_ret - params_C.age_min + 1
@@ -1637,9 +1666,21 @@ end
 # mean children at home by age, up to retirement
 mean_n_NC = vec(mean(params_NC.n_grid[panel_NC.n_state[1:ret_NC, :]], dims=2))
 mean_n_C = vec(mean(params_C.n_grid[panel_C.n_state[1:ret_C, :]], dims=2))
-plot(params_NC.age_grid[1:ret_NC], mean_n_NC, label="NC", lw=2)
-plot!(params_C.age_grid[1:ret_C], mean_n_C, label="C", lw=2,
-    xlabel="Age", ylabel="Mean children at home")
+
+fig = Figure(size=(600, 400), fontsize=18)
+ax = Axis(fig[1, 1],
+    xlabel="Age",
+    ylabel="Mean children at home",
+)
+
+lines!(ax, params_NC.age_grid[1:ret_NC], mean_n_NC,
+    linewidth=2, color=:blue, label="NC")
+lines!(ax, params_C.age_grid[1:ret_C], mean_n_C,
+    linewidth=2, color=:red, linestyle=:dashdot, label="C")
+
+axislegend(ax, position=:rt)
+
+fig
 
 mid_ϵ = (params_NC.ϵ_size + 1) ÷ 2
 mid_ν = (params_NC.ν_size + 1) ÷ 2
@@ -1680,14 +1721,198 @@ cum_K_C = cumsum(mean_K_C)
 fertile_NC = 1:(params_NC.age_inf-params_NC.age_min+1)
 fertile_C = 1:(params_C.age_inf-params_C.age_min+1)
 
-plot(params_NC.age_grid[fertile_NC], cum_K_NC[fertile_NC],
-    label="Non-college", lw=2.5, lc=:blue, ls=:solid,
+fig = Figure(size=(600, 400), fontsize=18)
+ax = Axis(fig[1, 1],
     xlabel="Age",
     ylabel="Cumulative average number of births",
-    legend=:topleft,
-    xlim=[18, 45],
     xticks=18:2:46,
+    limits=(18, 45, -0.05, 1.55),
 )
-plot!(params_C.age_grid[fertile_C], cum_K_C[fertile_C],
-    label="College", lw=2.5, lc=:red, ls=:dash,
+
+lines!(ax, params_NC.age_grid[fertile_NC], cum_K_NC[fertile_NC],
+    linewidth=2.5, color=:blue, label="Non-college")
+lines!(ax, params_C.age_grid[fertile_C], cum_K_C[fertile_C],
+    linewidth=2.5, color=:red, linestyle=:dashdot, label="College")
+
+axislegend(ax, position=:lt)
+
+fig
+
+save(save_phik, fig)
+
+using DataFrames
+using CategoricalArrays
+using FixedEffectModels
+using CairoMakie
+
+function _term_group_index(term::AbstractString, levels::Vector{String})
+    for (k, lev) in pairs(levels)
+        occursin(lev, term) && return k
+    end
+    return missing
+end
+
+function short_run_regression(panel::SimulatedPanel, parameters; Δ_a::Int=1)
+
+    @unpack a_size, a_grid, age_grid, age_min = parameters
+
+    panel_K = permutedims(Float64.(panel.K_choice))
+    panel_dK = permutedims(Float64.(panel.ΔK_choice)) .- panel_K
+    panel_a = permutedims(panel.a_state)
+    panel_a_adj = clamp.(panel_a, 1, a_size - Δ_a)
+    panel_da = a_grid[panel_a_adj.+Δ_a] .- a_grid[panel_a_adj]
+
+    N, T = size(panel_dK)
+
+    df = DataFrame(
+        i=repeat(1:N, T),
+        age=repeat(age_grid, inner=N),
+        dK=vec(panel_dK),
+        ai=vec(panel_a),
+        da=vec(panel_da),
+    )
+
+    df = df[df.ai.<=a_size-Δ_a, :]
+
+    if age_min < 20
+        levels = ["18-19", "20-24", "25-29", "30-34", "35-39", "40-44"]
+    else
+        levels = ["20-24", "25-29", "30-34", "35-39", "40-44"]
+    end
+
+    df.age_group = map(df.age) do j
+        if 18 <= j <= 19
+            "18-19"
+        elseif 20 <= j <= 24
+            "20-24"
+        elseif 25 <= j <= 29
+            "25-29"
+        elseif 30 <= j <= 34
+            "30-34"
+        elseif 35 <= j <= 39
+            "35-39"
+        elseif 40 <= j <= 44
+            "40-44"
+        else
+            missing
+        end
+    end
+    dropmissing!(df, [:age_group])
+    df.age_group = CategoricalArray(df.age_group; ordered=true, levels=levels)
+
+    m = reg(df, @formula(dK ~ 0 + age_group + da & age_group), Vcov.cluster(:i))
+    println(m)
+
+    out = DataFrame(term=coefnames(m), b=coef(m), se=stderror(m))
+    alpha = out[contains.(out.term, "da").&&contains.(out.term, "age_group"), :]
+    alpha.grp = [_term_group_index(t, levels) for t in alpha.term]
+    dropmissing!(alpha, [:grp])
+    sort!(alpha, :grp)
+
+    return (m=m, out=out, alpha=alpha, df=df, levels=levels)
+end
+
+res_NC = short_run_regression(panel_NC, params_NC; Δ_a=Δ_a_given)
+res_C = short_run_regression(panel_C, params_C; Δ_a=Δ_a_given)
+
+# shared axis: all 6 bins at positions 1–6
+all_levels = ["18-19", "20-24", "25-29", "30-34", "35-39", "40-44"]
+
+# NC maps to positions 1–6, C maps to positions 2–6
+nc_x = Float64.([findfirst(==(l), all_levels) for l in res_NC.levels])
+c_x = Float64.([findfirst(==(l), all_levels) for l in res_C.levels])
+
+# Non-college
+fig_NC = Figure(size=(600, 400), fontsize=18)
+ax_NC = Axis(fig_NC[1, 1],
+    xlabel="Age group", ylabel=L"\alpha_J",
+    xticks=(1:6, all_levels),
 )
+CairoMakie.lines!(ax_NC, nc_x, res_NC.alpha.b, linewidth=1.5, color=:blue)
+CairoMakie.errorbars!(ax_NC, nc_x, res_NC.alpha.b, 1.96 .* res_NC.alpha.se,
+    linewidth=1.5, whiskerwidth=8, color=:blue)
+CairoMakie.scatter!(ax_NC, nc_x, res_NC.alpha.b, markersize=8, color=:blue)
+CairoMakie.hlines!(ax_NC, [0.0], linestyle=:dash, color=:gray, linewidth=0.8)
+save("plot_short_run_NC.pdf", fig_NC)
+
+# College
+fig_C = Figure(size=(600, 400), fontsize=18)
+ax_C = Axis(fig_C[1, 1],
+    xlabel="Age group", ylabel=L"\alpha_J",
+    xticks=(1:6, all_levels),
+)
+CairoMakie.lines!(ax_C, c_x, res_C.alpha.b, linewidth=1.5, color=:red)
+CairoMakie.errorbars!(ax_C, c_x, res_C.alpha.b, 1.96 .* res_C.alpha.se,
+    linewidth=1.5, whiskerwidth=8, color=:red)
+CairoMakie.scatter!(ax_C, c_x, res_C.alpha.b, markersize=8, color=:red)
+CairoMakie.hlines!(ax_C, [0.0], linestyle=:dash, color=:gray, linewidth=0.8)
+save("plot_short_run_C.pdf", fig_C)
+
+fig = Figure(size=(600, 400), fontsize=18)
+ax = Axis(fig[1, 1],
+    xlabel="Age group",
+    ylabel=L"\alpha_J",
+    xticks=(1:6, all_levels),
+)
+
+CairoMakie.lines!(ax, nc_x, res_NC.alpha.b, linewidth=1.5, color=:blue)
+CairoMakie.errorbars!(ax, nc_x, res_NC.alpha.b, 1.96 .* res_NC.alpha.se,
+    linewidth=1.5, whiskerwidth=8, color=:blue)
+CairoMakie.scatter!(ax, nc_x, res_NC.alpha.b, markersize=8, color=:blue, label="Non-college")
+
+CairoMakie.lines!(ax, c_x, res_C.alpha.b, linewidth=1.5, color=:red)
+CairoMakie.errorbars!(ax, c_x, res_C.alpha.b, 1.96 .* res_C.alpha.se,
+    linewidth=1.5, whiskerwidth=8, color=:red)
+CairoMakie.scatter!(ax, c_x, res_C.alpha.b, markersize=8, color=:red, label="College")
+
+CairoMakie.hlines!(ax, [0.0], linestyle=:dash, color=:gray, linewidth=0.8)
+CairoMakie.axislegend(ax, position=:rt)
+
+save("plot_short_run_C_and_NC.pdf", fig)
+fig
+
+
+# compute mean profiles by age
+mean_a_NC = vec(mean(params_NC.a_grid[panel_NC.a_state], dims=2))
+mean_a_C = vec(mean(params_C.a_grid[panel_C.a_state], dims=2))
+
+mean_c_NC = vec(mean(panel_NC.c_choice, dims=2))
+mean_c_C = vec(mean(panel_C.c_choice, dims=2))
+
+# earnings: w_grid[ϵ, ν, age] looked up at each household's state
+function mean_earnings(panel, parameters)
+    @unpack w_grid = parameters
+    T, N = size(panel.a_state)
+    earn = zeros(T)
+    for h in 1:N, t in 1:T
+        earn[t] += w_grid[panel.ϵ_state[t, h], panel.ν_state[t, h], t]
+    end
+    return earn ./ N
+end
+
+mean_w_NC = mean_earnings(panel_NC, params_NC)
+mean_w_C = mean_earnings(panel_C, params_C)
+
+# wealth
+fig_a = Figure(size=(600, 400), fontsize=18)
+ax_a = Axis(fig_a[1, 1], xlabel="Age", ylabel="Assets")
+CairoMakie.lines!(ax_a, params_NC.age_grid, mean_a_NC, linewidth=2, color=:blue, label="Non-college")
+CairoMakie.lines!(ax_a, params_C.age_grid, mean_a_C, linewidth=2, color=:red, linestyle=:dashdot, label="College")
+CairoMakie.axislegend(ax_a, position=:lt)
+save("plot_lifecycle_wealth.pdf", fig_a)
+
+# earnings
+fig_w = Figure(size=(600, 400), fontsize=18)
+ax_w = Axis(fig_w[1, 1], xlabel="Age", ylabel="Earnings")
+CairoMakie.lines!(ax_w, params_NC.age_grid, mean_w_NC, linewidth=2, color=:blue, label="Non-college")
+CairoMakie.lines!(ax_w, params_C.age_grid, mean_w_C, linewidth=2, color=:red, linestyle=:dashdot, label="College")
+CairoMakie.axislegend(ax_w, position=:rt)
+save("plot_lifecycle_earnings.pdf", fig_w)
+
+# consumption
+fig_c = Figure(size=(600, 400), fontsize=18)
+ax_c = Axis(fig_c[1, 1], xlabel="Age", ylabel="Consumption")
+CairoMakie.lines!(ax_c, params_NC.age_grid, mean_c_NC, linewidth=2, color=:blue, label="Non-college")
+CairoMakie.lines!(ax_c, params_C.age_grid, mean_c_C, linewidth=2, color=:red, linestyle=:dashdot, label="College")
+CairoMakie.axislegend(ax_c, position=:lt)
+save("plot_lifecycle_consumption.pdf", fig_c)
